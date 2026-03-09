@@ -28,7 +28,7 @@ pub enum ProxyError {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = 8080)]
+    #[arg(short, long, default_value_t = 8080, env = "PROXY_PORT")]
     port: u16,
 }
 
@@ -47,6 +47,7 @@ lazy_static::lazy_static! {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive(Level::INFO.into()))
         .init();

@@ -6,9 +6,10 @@ interface RdpViewerProps {
     sessionId: string;
     password?: string;
     proxyUrl: string;
+    onDisconnect?: () => void;
 }
 
-const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl }) => {
+const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, onDisconnect }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
@@ -85,6 +86,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl }) 
                 console.log('[DEBUG] WebSocket Closed:', event.code, event.reason);
                 if (status !== 'error') {
                     setStatus('idle');
+                    onDisconnect?.();
                 }
             };
         };
@@ -178,7 +180,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl }) 
                     <h3 className="text-3xl font-black text-white mb-3 tracking-tight">Access Restricted</h3>
                     <p className="text-slate-500 max-w-sm mb-10 text-lg leading-relaxed">{error}</p>
                     <button
-                        onClick={() => window.location.reload()}
+                        onClick={() => onDisconnect?.()}
                         className="px-10 py-4 bg-white text-slate-950 hover:bg-slate-200 rounded-2xl transition-all font-black text-sm uppercase tracking-widest shadow-2xl active:scale-95"
                     >
                         Re-initialize Session

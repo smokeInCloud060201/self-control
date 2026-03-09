@@ -159,6 +159,7 @@ function App() {
                 sessionId={machineId}
                 password={password}
                 proxyUrl={proxyUrl}
+                onDisconnect={handleTerminate}
               />
             ) : (
               <div className="aspect-video bg-slate-950 rounded-2xl border border-slate-800 flex flex-col items-center justify-center p-12 text-center group">

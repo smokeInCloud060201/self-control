@@ -19,3 +19,5 @@ rand = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "1.0"
+clap = { version = "4.4", features = ["derive", "env"] }
+dotenvy = "0.15"

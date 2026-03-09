@@ -37,12 +37,25 @@ enum ControlEvent {
     MouseUp { button: String },
 }
 
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long, default_value = "localhost", env = "PROXY_SERVER")]
+    server: String,
+    #[arg(short, long, default_value_t = 8080, env = "PROXY_PORT")]
+    port: u16,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive(Level::INFO.into()))
         .init();
 
+    let args = Args::parse();
     let machine_id = machine_uid::get().unwrap_or_else(|_| "unknown-machine".to_string());
     let mut rng = thread_rng();
     let password: u32 = rng.gen_range(100000..999999);
@@ -98,7 +111,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    let proxy_url = format!("ws://localhost:8080/agent/{}/{}", machine_id, password_str);
+    let proxy_url = format!("ws://{}:{}/agent/{}/{}", args.server, args.port, machine_id, password_str);
     let config = WebSocketConfig {
         max_message_size: Some(128 * 1024 * 1024),
         max_frame_size: Some(32 * 1024 * 1024),
@@ -142,32 +155,41 @@ async fn main() -> Result<()> {
         // Frame Capture loop
         let mut frame_sent = 0;
         let mut last_status = std::time::Instant::now();
+        let mut capturer_opt: Option<Capturer> = None;
 
         loop {
             if control_task.is_finished() { break; }
 
             let streaming = { *is_streaming.lock().unwrap() };
             if !streaming {
+                capturer_opt = None; // Drop capturer when idle
                 sleep(Duration::from_millis(200)).await;
                 continue;
             }
 
-            // Lazy init capturer to handle display changes
-            let display = match Display::primary() {
-                Ok(d) => d,
-                Err(e) => {
-                    error!(error = %e, "Display link lost");
-                    break;
-                }
-            };
-            let mut capturer = match Capturer::new(display) {
-                Ok(c) => c,
-                Err(e) => {
-                    warn!(error = %e, "Capturer init failed, retrying");
-                    sleep(Duration::from_millis(500)).await;
-                    continue;
-                }
-            };
+            // Lazy init capturer ONCE when streaming starts
+            if capturer_opt.is_none() {
+                let display = match Display::primary() {
+                    Ok(d) => d,
+                    Err(e) => {
+                        error!(error = %e, "Display link lost");
+                        break;
+                    }
+                };
+                match Capturer::new(display) {
+                    Ok(c) => {
+                        info!(width = c.width(), height = c.height(), "Capturer initialized");
+                        capturer_opt = Some(c);
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Capturer init failed, retrying");
+                        sleep(Duration::from_millis(500)).await;
+                        continue;
+                    }
+                };
+            }
+
+            let capturer = capturer_opt.as_mut().unwrap();
             let (width, height) = (capturer.width(), capturer.height());
 
             match capturer.frame() {
@@ -207,7 +229,9 @@ async fn main() -> Result<()> {
                     continue;
                 }
                 Err(e) => {
-                    debug!(error = %e, "Capture skip");
+                    debug!(error = %e, "Capture error, resetting capturer");
+                    capturer_opt = None; 
+                    sleep(Duration::from_millis(100)).await;
                     continue;
                 }
             }
