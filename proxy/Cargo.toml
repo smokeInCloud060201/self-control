@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 lazy_static = "1.4"
 tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.21"
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
 futures-util = "0.3"
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
