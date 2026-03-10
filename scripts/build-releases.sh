@@ -8,10 +8,19 @@ RELEASE_DIR="${REPO_ROOT}/releases"
 
 mkdir -p "$RELEASE_DIR"
 
-echo "--- Building for macOS (native) ---"
+echo "--- Building for macOS (.app bundle) ---"
 cd "${REPO_ROOT}/agent"
 cargo build --release
-cp target/release/agent "${RELEASE_DIR}/agent-macos"
+
+APP_NAME="RustRemote"
+APP_BUNDLE="${RELEASE_DIR}/${APP_NAME}.app"
+
+mkdir -p "${APP_BUNDLE}/Contents/MacOS"
+cp target/release/agent "${APP_BUNDLE}/Contents/MacOS/"
+cp build/Info.plist "${APP_BUNDLE}/Contents/"
+
+# Also keep a standalone binary for convenience
+cp target/release/agent "${RELEASE_DIR}/agent-macos-bin"
 
 echo "--- Building for Windows (x86_64-mscv) ---"
 # cargo-xwin handles the Windows SDK automatically
