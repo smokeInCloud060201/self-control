@@ -11,7 +11,7 @@ pipeline {
 
         DOCKER_BIN = "docker"
         DOCKER_COMPOSE_BIN = "docker-compose"
-        DOCKER_BASE_PATH = "./deploy/docker"
+        DOCKER_BASE_PATH = "./deploy/dockerfile"
         DOCKER_COMPOSE_BASE_PATH = "./deploy"
 
         DATA_NETWORK    = credentials('DATA_NETWORK')
