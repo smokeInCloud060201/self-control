@@ -21,7 +21,7 @@ services:
 networks:
   self-control:
     driver: bridge
-    proxy_network:
+  proxy_network:
     name: ${TRAEFIK_NETWORK}
     external: true
   sunflower_data:
