@@ -97,4 +97,12 @@ impl Display {
     pub fn height(&self) -> usize {
         self.0.height()
     }
+
+    pub fn logical_width(&self) -> usize {
+        self.0.logical_width()
+    }
+
+    pub fn logical_height(&self) -> usize {
+        self.0.logical_height()
+    }
 }

@@ -5,7 +5,7 @@ import RdpViewer from './components/RdpViewer'
 function App() {
   const [machineId, setMachineId] = useState('')
   const [password, setPassword] = useState('')
-  const [proxyUrl] = useState(import.meta.env.VITE_PROXY_URL || 'ws://localhost:8080')
+  const [proxyUrl] = useState(import.meta.env.VITE_PROXY_URL || 'wss://selfcontrol-api.sonbn.xyz:443')
   const [isConnected, setIsConnected] = useState(false)
 
   const handleConnect = (e: React.FormEvent) => {

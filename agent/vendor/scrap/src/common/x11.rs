@@ -68,4 +68,12 @@ impl Display {
     pub fn height(&self) -> usize {
         self.0.rect().h as usize
     }
+
+    pub fn logical_width(&self) -> usize {
+        self.width()
+    }
+
+    pub fn logical_height(&self) -> usize {
+        self.height()
+    }
 }

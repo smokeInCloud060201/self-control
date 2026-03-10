@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use scrap::{Display, Capturer};
 use std::io::ErrorKind;
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use enigo::{Enigo, MouseButton, MouseControllable};
 use std::sync::{Arc, Mutex};
 use rand::{thread_rng, Rng};
-use tracing::{info, warn, error, debug, instrument, Level};
+use tracing::{info, warn, error, debug, Level};
 use tracing_subscriber::EnvFilter;
 use thiserror::Error;
 
@@ -193,7 +193,9 @@ async fn main() -> Result<()> {
                     tokio::task::spawn_blocking(move || {
                         if let Ok(display) = Display::primary() {
                             let mut enigo = Enigo::new();
-                            enigo.mouse_move_to((x * display.width() as f32) as i32, (y * display.height() as f32) as i32);
+                            let lx = x * display.logical_width() as f32;
+                            let ly = y * display.logical_height() as f32;
+                            enigo.mouse_move_to(lx as i32, ly as i32);
                         }
                     }).await.ok();
                 }

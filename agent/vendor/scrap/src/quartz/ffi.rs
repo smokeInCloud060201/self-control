@@ -15,6 +15,24 @@ pub type DispatchQueueAttr = *mut c_void;
 pub type CFAllocatorRef = *mut c_void;
 
 #[repr(C)]
+pub struct CGPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[repr(C)]
+pub struct CGSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+#[repr(C)]
+pub struct CGRect {
+    pub origin: CGPoint,
+    pub size: CGSize,
+}
+
+#[repr(C)]
 pub struct CFDictionaryKeyCallBacks {
     callbacks: [usize; 5],
     version: i32
@@ -159,6 +177,7 @@ extern {
     pub fn CGMainDisplayID() -> u32;
     pub fn CGDisplayPixelsWide(display: u32) -> usize;
     pub fn CGDisplayPixelsHigh(display: u32) -> usize;
+    pub fn CGDisplayBounds(display: u32) -> CGRect;
 
     pub fn CGGetOnlineDisplayList(
         max_displays: u32,

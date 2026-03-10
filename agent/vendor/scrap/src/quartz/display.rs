@@ -40,6 +40,14 @@ impl Display {
         unsafe { CGDisplayPixelsHigh(self.0) }
     }
 
+    pub fn logical_width(self) -> usize {
+        unsafe { CGDisplayBounds(self.0).size.width as usize }
+    }
+
+    pub fn logical_height(self) -> usize {
+        unsafe { CGDisplayBounds(self.0).size.height as usize }
+    }
+
     pub fn is_builtin(self) -> bool {
         unsafe { CGDisplayIsBuiltin(self.0) != 0 }
     }

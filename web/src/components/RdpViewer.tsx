@@ -15,6 +15,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
     const [error, setError] = useState<string | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
+    const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
 
     const toggleFullscreen = () => {
         if (containerRef.current) {
@@ -34,10 +35,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
         let isCleanup = false;
 
         const startConnection = () => {
-            if (wsRef.current) {
-                console.log('[DEBUG] Connection already exists, skipping');
-                return;
-            }
+            if (wsRef.current) return;
 
             setStatus('connecting');
             setError(null);
@@ -45,7 +43,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
             const cleanProxyUrl = proxyUrl.endsWith('/') ? proxyUrl.slice(0, -1) : proxyUrl;
             const wsUrl = `${cleanProxyUrl}/client/${sessionId}/${password || 'no-pass'}`;
 
-            console.log('[DEBUG] Attempting to connect to WebSocket:', wsUrl);
+            console.log('[DEBUG] Connecting to WebSocket:', wsUrl);
 
             try {
                 const ws = new WebSocket(wsUrl);
@@ -53,13 +51,8 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                 wsRef.current = ws;
 
                 ws.onopen = () => {
-                    if (isCleanup) {
-                        console.log('[DEBUG] WebSocket opened but component was cleaned up, closing');
-                        ws.close();
-                        return;
-                    }
+                    if (isCleanup) { ws.close(); return; }
                     setStatus('connected');
-                    console.log('[DEBUG] WebSocket opened successfully');
                 };
 
                 ws.onmessage = async (event) => {
@@ -76,7 +69,8 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                                     if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
                                         canvas.width = bitmap.width;
                                         canvas.height = bitmap.height;
-                                        console.log('[DEBUG] Adjusted canvas resolution to:', bitmap.width, 'x', bitmap.height);
+                                        setAspectRatio(bitmap.width / bitmap.height);
+                                        console.log(`[DEBUG] Resolution: ${bitmap.width}x${bitmap.height}, Ratio: ${bitmap.width / bitmap.height}`);
                                     }
                                     ctx.drawImage(bitmap, 0, 0);
                                 }
@@ -85,33 +79,32 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                             console.error('[DEBUG] Frame decode error:', e);
                         }
                     } else if (typeof event.data === 'string') {
-                        console.log('[DEBUG] Text message received:', event.data);
+                        // console.log('[DEBUG] Text message received:', event.data); // Removed as per instructions
                     }
                 };
 
                 ws.onerror = (e) => {
                     if (isCleanup) return;
-                    console.error('[DEBUG] WebSocket Error Event:', e);
-                    setError('Connection failed. Please check your proxy URL and credentials.');
+                    console.error('[DEBUG] WebSocket Error:', e);
+                    setError('Connection failed. Please check credentials and proxy.');
                     setStatus('error');
                 };
 
                 ws.onclose = (event) => {
                     if (isCleanup) {
-                        console.log('[DEBUG] WebSocket closed via cleanup');
+                        // console.log('[DEBUG] WebSocket closed via cleanup'); // Removed as per instructions
                         return;
                     }
-                    console.log('[DEBUG] WebSocket Closed:', event.code, event.reason, 'Clean:', event.wasClean);
+                    console.log('[DEBUG] WebSocket Closed:', event.code, event.reason);
                     setStatus('idle');
                     if (event.code !== 1000 && event.code !== 1001) { // 1000: Normal Closure, 1001: Going Away
-                        setError(`Connection closed: ${event.reason || 'Unknown reason'} (${event.code})`);
+                        setError(`Session ended: ${event.reason || 'Network error'} (${event.code})`);
                         setStatus('error');
                     }
                     onDisconnect?.();
                 };
             } catch (err) {
-                console.error('[DEBUG] WebSocket construction failed:', err);
-                setError('Failed to create WebSocket. Check if the URL is valid.');
+                setError('Failed to initialize WebSocket.');
                 setStatus('error');
             }
         };
@@ -119,10 +112,10 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
         startConnection();
 
         return () => {
-            console.log('[DEBUG] Cleaning up RdpViewer effect');
+            // console.log('[DEBUG] Cleaning up RdpViewer effect'); // Removed as per instructions
             isCleanup = true;
             if (wsRef.current) {
-                wsRef.current.close(1000, 'Component unmounted');
+                wsRef.current.close(1000, 'Unmount');
                 wsRef.current = null;
             }
         };
@@ -132,13 +125,11 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     const handleMouseMove = (e: React.MouseEvent) => {
         if (wsRef.current?.readyState === WebSocket.OPEN && canvasRef.current) {
             const rect = canvasRef.current.getBoundingClientRect();
-            const x = (e.clientX - rect.left) / rect.width;
-            const y = (e.clientY - rect.top) / rect.height;
+            // Using nativeEvent.offsetX is more accurate relative to the content area
+            const x = e.nativeEvent.offsetX / rect.width;
+            const y = e.nativeEvent.offsetY / rect.height;
 
-            wsRef.current.send(JSON.stringify({
-                type: 'MouseMove',
-                x, y
-            }));
+            wsRef.current.send(JSON.stringify({ type: 'MouseMove', x, y }));
         }
     };
 
@@ -185,8 +176,9 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     return (
         <div
             ref={containerRef}
+            style={{ aspectRatio: `${aspectRatio}` }}
             className={cn(
-                "relative w-full aspect-video bg-slate-950 rounded-3xl overflow-hidden border border-white/5 shadow-2xl transition-all outline-none",
+                "relative w-full bg-slate-950 rounded-3xl overflow-hidden border border-white/5 shadow-2xl transition-all outline-none",
                 status === 'connected' ? "ring-2 ring-blue-500/20 shadow-blue-500/10" : ""
             )}
         >
