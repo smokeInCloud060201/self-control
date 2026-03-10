@@ -29,73 +29,100 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     };
 
     useEffect(() => {
-        if (!canvasRef.current || status === 'connected') return;
+        if (!canvasRef.current) return;
+
+        let isCleanup = false;
 
         const startConnection = () => {
+            if (wsRef.current) {
+                console.log('[DEBUG] Connection already exists, skipping');
+                return;
+            }
+
             setStatus('connecting');
             setError(null);
 
             const cleanProxyUrl = proxyUrl.endsWith('/') ? proxyUrl.slice(0, -1) : proxyUrl;
             const wsUrl = `${cleanProxyUrl}/client/${sessionId}/${password || 'no-pass'}`;
 
-            console.log('[DEBUG] Connecting to WebSocket:', wsUrl);
+            console.log('[DEBUG] Attempting to connect to WebSocket:', wsUrl);
 
-            const ws = new WebSocket(wsUrl);
-            ws.binaryType = 'arraybuffer';
-            wsRef.current = ws;
+            try {
+                const ws = new WebSocket(wsUrl);
+                ws.binaryType = 'arraybuffer';
+                wsRef.current = ws;
 
-            ws.onopen = () => {
-                setStatus('connected');
-                console.log('[DEBUG] WebSocket connected successfully');
-            };
-
-            ws.onmessage = async (event) => {
-                if (event.data instanceof ArrayBuffer) {
-                    try {
-                        // console.log('[DEBUG] Frame received, size:', event.data.byteLength);
-                        const blob = new Blob([event.data], { type: 'image/jpeg' });
-                        const bitmap = await createImageBitmap(blob);
-
-                        const canvas = canvasRef.current;
-                        if (canvas) {
-                            const ctx = canvas.getContext('2d');
-                            if (ctx) {
-                                if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-                                    canvas.width = bitmap.width;
-                                    canvas.height = bitmap.height;
-                                    console.log('[DEBUG] Adjusted canvas resolution to:', bitmap.width, 'x', bitmap.height);
-                                }
-                                ctx.drawImage(bitmap, 0, 0);
-                            }
-                        }
-                    } catch (e) {
-                        console.error('[DEBUG] Frame decode error:', e);
+                ws.onopen = () => {
+                    if (isCleanup) {
+                        console.log('[DEBUG] WebSocket opened but component was cleaned up, closing');
+                        ws.close();
+                        return;
                     }
-                } else if (typeof event.data === 'string') {
-                    console.log('[DEBUG] Text message received:', event.data);
-                }
-            };
+                    setStatus('connected');
+                    console.log('[DEBUG] WebSocket opened successfully');
+                };
 
-            ws.onerror = (e) => {
-                console.error('[DEBUG] WebSocket Error:', e);
-                setError('Connection failed. Please check Machine ID and Password.');
-                setStatus('error');
-            };
+                ws.onmessage = async (event) => {
+                    if (isCleanup) return;
+                    if (event.data instanceof ArrayBuffer) {
+                        try {
+                            const blob = new Blob([event.data], { type: 'image/jpeg' });
+                            const bitmap = await createImageBitmap(blob);
 
-            ws.onclose = (event) => {
-                console.log('[DEBUG] WebSocket Closed:', event.code, event.reason);
-                if (status !== 'error') {
+                            const canvas = canvasRef.current;
+                            if (canvas) {
+                                const ctx = canvas.getContext('2d');
+                                if (ctx) {
+                                    if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+                                        canvas.width = bitmap.width;
+                                        canvas.height = bitmap.height;
+                                        console.log('[DEBUG] Adjusted canvas resolution to:', bitmap.width, 'x', bitmap.height);
+                                    }
+                                    ctx.drawImage(bitmap, 0, 0);
+                                }
+                            }
+                        } catch (e) {
+                            console.error('[DEBUG] Frame decode error:', e);
+                        }
+                    } else if (typeof event.data === 'string') {
+                        console.log('[DEBUG] Text message received:', event.data);
+                    }
+                };
+
+                ws.onerror = (e) => {
+                    if (isCleanup) return;
+                    console.error('[DEBUG] WebSocket Error Event:', e);
+                    setError('Connection failed. Please check your proxy URL and credentials.');
+                    setStatus('error');
+                };
+
+                ws.onclose = (event) => {
+                    if (isCleanup) {
+                        console.log('[DEBUG] WebSocket closed via cleanup');
+                        return;
+                    }
+                    console.log('[DEBUG] WebSocket Closed:', event.code, event.reason, 'Clean:', event.wasClean);
                     setStatus('idle');
+                    if (event.code !== 1000 && event.code !== 1001) { // 1000: Normal Closure, 1001: Going Away
+                        setError(`Connection closed: ${event.reason || 'Unknown reason'} (${event.code})`);
+                        setStatus('error');
+                    }
                     onDisconnect?.();
-                }
-            };
+                };
+            } catch (err) {
+                console.error('[DEBUG] WebSocket construction failed:', err);
+                setError('Failed to create WebSocket. Check if the URL is valid.');
+                setStatus('error');
+            }
         };
 
         startConnection();
 
         return () => {
+            console.log('[DEBUG] Cleaning up RdpViewer effect');
+            isCleanup = true;
             if (wsRef.current) {
-                wsRef.current.close();
+                wsRef.current.close(1000, 'Component unmounted');
                 wsRef.current = null;
             }
         };

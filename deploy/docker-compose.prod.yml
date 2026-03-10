@@ -6,7 +6,7 @@ services:
     container_name: self-control-proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.self-control.rule=Host(`yt.sonbn.xyz`)"
+      - "traefik.http.routers.self-control.rule=Host(`selfcontrol-api.sonbn.xyz`)"
       - "traefik.http.routers.self-control.entrypoints=websecure"
       - "traefik.http.routers.self-control.tls.certresolver=le"
       - "traefik.http.services.self-control.loadbalancer.server.port=8080"
@@ -17,7 +17,24 @@ services:
       - "8080"
     networks:
       - self-control
-      - ${TRAEFIK_NETWORK}
+      - proxy_network
+  web:
+    image: self-control-web:latest
+    container_name: self-control-web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.self-control-web.rule=Host(`selfcontrol.sonbn.xyz`)"
+      - "traefik.http.routers.self-control-web.entrypoints=websecure"
+      - "traefik.http.routers.self-control-web.tls.certresolver=le"
+      - "traefik.http.services.self-control-web.loadbalancer.server.port=80"
+      - "traefik.http.routers.self-control-web.priority=20"
+    environment:
+      - VITE_PROXY_URL=wss://yt.sonbn.xyz:443
+    expose:
+      - "80"
+    networks:
+      - self-control
+      - proxy_network
     
 networks:
   self-control:
