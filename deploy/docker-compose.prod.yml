@@ -17,6 +17,7 @@ services:
       - "8080"
     networks:
       - self-control
+      - ${TRAEFIK_NETWORK}
     
 networks:
   self-control:

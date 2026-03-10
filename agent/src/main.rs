@@ -35,6 +35,8 @@ enum ControlEvent {
     MouseMove { x: f32, y: f32 },
     MouseDown { button: String },
     MouseUp { button: String },
+    KeyDown { key: String },
+    KeyUp { key: String },
 }
 
 use clap::Parser;
@@ -57,6 +59,17 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     
+    let mut server = args.server.clone();
+    let mut scheme = "ws";
+    if server.contains("://") {
+        if server.starts_with("https://") {
+            scheme = "wss";
+        }
+        server = server.split("://").last().unwrap_or(&server).to_string();
+    }
+    // Remove any trailing slashes
+    server = server.trim_end_matches('/').to_string();
+
     // Use local IP as machine ID as suggested by user
     let machine_id = local_ip_address::local_ip()
         .map(|ip| ip.to_string())
@@ -198,11 +211,50 @@ async fn main() -> Result<()> {
                         enigo.mouse_up(btn);
                     }).await.ok();
                 }
+                ControlEvent::KeyDown { key } => {
+                    tokio::task::spawn_blocking(move || {
+                        use enigo::KeyboardControllable;
+                        let mut enigo = Enigo::new();
+                        if let Some(k) = parse_key(&key) {
+                            enigo.key_down(k);
+                        }
+                    }).await.ok();
+                }
+                ControlEvent::KeyUp { key } => {
+                    tokio::task::spawn_blocking(move || {
+                        use enigo::KeyboardControllable;
+                        let mut enigo = Enigo::new();
+                        if let Some(k) = parse_key(&key) {
+                            enigo.key_up(k);
+                        }
+                    }).await.ok();
+                }
             }
         }
     });
 
-    let proxy_url = format!("ws://{}:{}/agent/{}/{}", args.server, args.port, machine_id, password_str);
+fn parse_key(key: &str) -> Option<enigo::Key> {
+    use enigo::Key;
+    match key.to_lowercase().as_str() {
+        "enter" | "return" => Some(Key::Return),
+        "backspace" => Some(Key::Backspace),
+        "tab" => Some(Key::Tab),
+        "space" => Some(Key::Space),
+        "escape" | "esc" => Some(Key::Escape),
+        "control" | "ctrl" => Some(Key::Control),
+        "shift" => Some(Key::Shift),
+        "alt" | "option" => Some(Key::Alt),
+        "meta" | "command" | "win" | "super" => Some(Key::Meta),
+        "up" | "arrowup" => Some(Key::UpArrow),
+        "down" | "arrowdown" => Some(Key::DownArrow),
+        "left" | "arrowleft" => Some(Key::LeftArrow),
+        "right" | "arrowright" => Some(Key::RightArrow),
+        k if k.len() == 1 => Some(Key::Layout(k.chars().next().unwrap())),
+        _ => None,
+    }
+}
+
+    let proxy_url = format!("{}://{}:{}/agent/{}/{}", scheme, server, args.port, machine_id, password_str);
     let config = WebSocketConfig {
         max_message_size: Some(128 * 1024 * 1024),
         max_frame_size: Some(32 * 1024 * 1024),

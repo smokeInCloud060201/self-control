@@ -1,12 +1,11 @@
 import { useState } from 'react'
-import { Monitor, Shield, Zap, Globe, Github, Terminal, Key, Activity } from 'lucide-react'
+import { Monitor, Shield, Zap, Github, Terminal, Key, Activity } from 'lucide-react'
 import RdpViewer from './components/RdpViewer'
-import { cn } from './lib/utils'
 
 function App() {
   const [machineId, setMachineId] = useState('')
   const [password, setPassword] = useState('')
-  const [proxyUrl, setProxyUrl] = useState('ws://localhost:8080')
+  const [proxyUrl] = useState(import.meta.env.VITE_PROXY_URL || 'ws://localhost:8080')
   const [isConnected, setIsConnected] = useState(false)
 
   const handleConnect = (e: React.FormEvent) => {
@@ -47,7 +46,7 @@ function App() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 h-[calc(100vh-5rem)]">
-        <div className="grid lg:grid-cols-12 gap-12 items-start">
+        <div className="grid lg:grid-cols-12 gap-12 items-start h-full">
 
           {/* Left Column: UI & Controls */}
           <div className="lg:col-span-5 space-y-8">
@@ -70,10 +69,7 @@ function App() {
             {!isConnected ? (
               <form
                 onSubmit={handleConnect}
-                className={cn(
-                  "relative group overflow-hidden bg-slate-900/40 backdrop-blur-xl p-8 rounded-3xl border border-white/5 shadow-2xl space-y-8 transition-all hover:border-blue-500/30",
-                  isConnected && "hidden"
-                )}
+                className="relative group overflow-hidden bg-slate-900/40 backdrop-blur-xl p-8 rounded-3xl border border-white/5 shadow-2xl space-y-8 transition-all hover:border-blue-500/30"
               >
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent pointer-events-none" />
 
@@ -93,33 +89,19 @@ function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Passkey</label>
-                      <div className="relative group/input">
-                        <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-600 group-focus-within/input:text-blue-500 transition-colors" />
-                        <input
-                          type="text"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          className="w-full bg-slate-950/50 border border-white/5 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-700 font-mono"
-                          placeholder="000000"
-                          maxLength={6}
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Relay Node</label>
-                      <div className="relative group/input">
-                        <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-600 group-focus-within/input:text-blue-500 transition-colors" />
-                        <input
-                          type="text"
-                          value={proxyUrl}
-                          onChange={(e) => setProxyUrl(e.target.value)}
-                          className="w-full bg-slate-950/50 border border-white/5 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all text-xs font-mono"
-                        />
-                      </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Passkey</label>
+                    <div className="relative group/input">
+                      <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-600 group-focus-within/input:text-blue-500 transition-colors" />
+                      <input
+                        type="text"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full bg-slate-950/50 border border-white/5 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-700 font-mono"
+                        placeholder="000000"
+                        maxLength={6}
+                        required
+                      />
                     </div>
                   </div>
                 </div>
@@ -153,7 +135,7 @@ function App() {
           </div>
 
           {/* Right Column: Viewer */}
-          <div className="lg:col-span-7">
+          <div className="lg:col-span-7 h-full min-h-[500px]">
             {isConnected ? (
               <RdpViewer
                 sessionId={machineId}
@@ -162,7 +144,7 @@ function App() {
                 onDisconnect={handleTerminate}
               />
             ) : (
-              <div className="aspect-video bg-slate-950 rounded-2xl border border-slate-800 flex flex-col items-center justify-center p-12 text-center group">
+              <div className="h-full bg-slate-950 rounded-2xl border border-slate-800 flex flex-col items-center justify-center p-12 text-center group">
                 <Monitor className="w-20 h-20 text-slate-800 mb-6" />
                 <h3 className="text-2xl font-bold text-slate-600 mb-2">Waiting for Credentials</h3>
                 <p className="text-slate-600 max-w-xs text-sm">Once connected, the remote screen will appear here in high definition.</p>

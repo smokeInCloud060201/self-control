@@ -133,11 +133,33 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
         }
     };
 
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+                type: 'KeyDown',
+                key: e.key
+            }));
+            // Prevent default for common shortcuts that might disrupt browser
+            if (['Tab', 'Alt', 'Meta'].includes(e.key)) {
+                e.preventDefault();
+            }
+        }
+    };
+
+    const handleKeyUp = (e: React.KeyboardEvent) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+                type: 'KeyUp',
+                key: e.key
+            }));
+        }
+    };
+
     return (
         <div
             ref={containerRef}
             className={cn(
-                "relative w-full aspect-video bg-slate-950 rounded-3xl overflow-hidden border border-white/5 shadow-2xl transition-all",
+                "relative w-full aspect-video bg-slate-950 rounded-3xl overflow-hidden border border-white/5 shadow-2xl transition-all outline-none",
                 status === 'connected' ? "ring-2 ring-blue-500/20 shadow-blue-500/10" : ""
             )}
         >
@@ -191,13 +213,19 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
             <canvas
                 ref={canvasRef}
                 className={cn(
-                    "w-full h-full cursor-none object-contain transition-opacity duration-1000",
+                    "w-full h-full cursor-default object-contain transition-opacity duration-1000 outline-none",
                     status === 'connected' ? "opacity-100" : "opacity-0"
                 )}
                 id="remote-canvas"
+                tabIndex={0}
                 onMouseMove={handleMouseMove}
-                onMouseDown={(e) => handleMouseDown(e.button === 0 ? 'left' : 'right')}
+                onMouseDown={(e) => {
+                    e.currentTarget.focus();
+                    handleMouseDown(e.button === 0 ? 'left' : 'right');
+                }}
                 onMouseUp={(e) => handleMouseUp(e.button === 0 ? 'left' : 'right')}
+                onKeyDown={handleKeyDown}
+                onKeyUp={handleKeyUp}
                 onContextMenu={(e) => e.preventDefault()}
             />
         </div>
