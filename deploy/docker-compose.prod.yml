@@ -1,0 +1,31 @@
+
+
+services:
+  proxy:
+    image: self-control-proxy:latest
+    container_name: self-control-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.yt-api.rule=Host(`yt.sonbn.xyz`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.yt-api.entrypoints=websecure"
+      - "traefik.http.routers.yt-api.tls.certresolver=le"
+      - "traefik.http.services.yt-api.loadbalancer.server.port=8080"
+      - "traefik.http.routers.yt-api.priority=20"
+      - "traefik.http.middlewares.api-strip.stripprefix.prefixes=/api"
+      - "traefik.http.routers.yt-api.middlewares=api-strip"
+    environment:
+      - PROXY_PORT=8080
+    expose:
+      - "8080"
+    networks:
+      - self-control
+    
+networks:
+  self-control:
+    driver: bridge
+    proxy_network:
+    name: ${TRAEFIK_NETWORK}
+    external: true
+  sunflower_data:
+    name: ${DATA_NETWORK}
+    external: true
