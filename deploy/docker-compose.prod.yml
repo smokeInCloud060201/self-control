@@ -6,13 +6,11 @@ services:
     container_name: self-control-proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.yt-api.rule=Host(`yt.sonbn.xyz`) && PathPrefix(`/api`)"
-      - "traefik.http.routers.yt-api.entrypoints=websecure"
-      - "traefik.http.routers.yt-api.tls.certresolver=le"
-      - "traefik.http.services.yt-api.loadbalancer.server.port=8080"
-      - "traefik.http.routers.yt-api.priority=20"
-      - "traefik.http.middlewares.api-strip.stripprefix.prefixes=/api"
-      - "traefik.http.routers.yt-api.middlewares=api-strip"
+      - "traefik.http.routers.self-control.rule=Host(`yt.sonbn.xyz`)"
+      - "traefik.http.routers.self-control.entrypoints=websecure"
+      - "traefik.http.routers.self-control.tls.certresolver=le"
+      - "traefik.http.services.self-control.loadbalancer.server.port=8080"
+      - "traefik.http.routers.self-control.priority=20"
     environment:
       - PROXY_PORT=8080
     expose:

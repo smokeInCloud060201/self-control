@@ -219,7 +219,7 @@ async fn main() -> Result<()> {
                 continue;
             }
         };
-        info!("Connected to proxy");
+        info!("Connected to proxy {}:{}", args.server, args.port);
 
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
         let event_tx_clone = event_tx.clone();
