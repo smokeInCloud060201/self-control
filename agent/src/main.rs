@@ -56,7 +56,13 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
-    let machine_id = machine_uid::get().unwrap_or_else(|_| "unknown-machine".to_string());
+    
+    // Use local IP as machine ID as suggested by user
+    let machine_id = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| {
+            machine_uid::get().unwrap_or_else(|_| "unknown-machine".to_string())
+        });
     let mut rng = thread_rng();
     let password: u32 = rng.gen_range(100000..999999);
     let password_str = password.to_string();
@@ -69,7 +75,92 @@ async fn main() -> Result<()> {
 
     let is_streaming = Arc::new(Mutex::new(false));
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<ControlEvent>(100);
+    let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
     
+    // Capture Thread (dedicated OS thread to avoid Tokio runtime conflicts)
+    let is_streaming_cap = is_streaming.clone();
+    std::thread::spawn(move || {
+        let mut capturer_opt: Option<Capturer> = None;
+        let mut last_status = std::time::Instant::now();
+        let mut frame_sent = 0;
+
+        loop {
+            let streaming = { *is_streaming_cap.lock().unwrap() };
+            if !streaming {
+                capturer_opt = None;
+                std::thread::sleep(Duration::from_millis(200));
+                continue;
+            }
+
+            if capturer_opt.is_none() {
+                match Display::primary() {
+                    Ok(display) => {
+                        match Capturer::new(display) {
+                            Ok(c) => {
+                                info!(width = c.width(), height = c.height(), "Capturer initialized");
+                                capturer_opt = Some(c);
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "Capturer init failed, retrying");
+                                std::thread::sleep(Duration::from_millis(500));
+                                continue;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Display link lost, retrying");
+                        std::thread::sleep(Duration::from_millis(500));
+                        continue;
+                    }
+                }
+            }
+
+            let capturer = capturer_opt.as_mut().unwrap();
+            let (width, height) = (capturer.width(), capturer.height());
+
+            match capturer.frame() {
+                Ok(frame) => {
+                    let expected = width * height * 4;
+                    if frame.len() < expected { continue; }
+
+                    let mut buffer = Vec::new();
+                    let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 50);
+                    
+                    let mut rgb_data = Vec::with_capacity(width * height * 3);
+                    for chunk in frame[..expected].chunks_exact(4) {
+                        rgb_data.push(chunk[2]);
+                        rgb_data.push(chunk[1]);
+                        rgb_data.push(chunk[0]);
+                    }
+
+                    if let Some(img) = RgbImage::from_raw(width as u32, height as u32, rgb_data) {
+                        if let Ok(_) = encoder.encode_image(&img) {
+                            if let Err(_) = frame_tx.blocking_send(buffer) {
+                                break; // Receiver dropped
+                            }
+                            frame_sent += 1;
+                        }
+                    }
+                    
+                    if last_status.elapsed().as_secs() >= 5 {
+                        info!("[STATUS] Uplink: {} fps", frame_sent / 5);
+                        frame_sent = 0;
+                        last_status = std::time::Instant::now();
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(16));
+                }
+                Err(e) => {
+                    debug!(error = %e, "Capture error, resetting capturer");
+                    capturer_opt = None; 
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+        }
+    });
+
     // Input Handler Task
     let is_streaming_ctrl = is_streaming.clone();
     tokio::spawn(async move {
@@ -134,7 +225,7 @@ async fn main() -> Result<()> {
         let event_tx_clone = event_tx.clone();
 
         // Relay Control Events from Proxy
-        let control_task = tokio::spawn(async move {
+        let mut control_task = tokio::spawn(async move {
             while let Some(msg) = ws_receiver.next().await {
                 match msg {
                     Ok(Message::Text(text)) => {
@@ -152,87 +243,17 @@ async fn main() -> Result<()> {
             }
         });
 
-        // Frame Capture loop
-        let mut frame_sent = 0;
-        let mut last_status = std::time::Instant::now();
-        let mut capturer_opt: Option<Capturer> = None;
-
+        // Relay Frames To Proxy
         loop {
-            if control_task.is_finished() { break; }
-
-            let streaming = { *is_streaming.lock().unwrap() };
-            if !streaming {
-                capturer_opt = None; // Drop capturer when idle
-                sleep(Duration::from_millis(200)).await;
-                continue;
-            }
-
-            // Lazy init capturer ONCE when streaming starts
-            if capturer_opt.is_none() {
-                let display = match Display::primary() {
-                    Ok(d) => d,
-                    Err(e) => {
-                        error!(error = %e, "Display link lost");
+            tokio::select! {
+                Some(buffer) = frame_rx.recv() => {
+                    if let Err(e) = ws_sender.send(Message::Binary(buffer)).await {
+                        debug!(error = %e, "Relay send failed");
                         break;
                     }
-                };
-                match Capturer::new(display) {
-                    Ok(c) => {
-                        info!(width = c.width(), height = c.height(), "Capturer initialized");
-                        capturer_opt = Some(c);
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Capturer init failed, retrying");
-                        sleep(Duration::from_millis(500)).await;
-                        continue;
-                    }
-                };
-            }
-
-            let capturer = capturer_opt.as_mut().unwrap();
-            let (width, height) = (capturer.width(), capturer.height());
-
-            match capturer.frame() {
-                Ok(frame) => {
-                    let expected = width * height * 4;
-                    if frame.len() < expected { continue; }
-
-                    let mut buffer = Vec::new();
-                    let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 50);
-                    
-                    let mut rgb_data = Vec::with_capacity(width * height * 3);
-                    for chunk in frame[..expected].chunks_exact(4) {
-                        rgb_data.push(chunk[2]);
-                        rgb_data.push(chunk[1]);
-                        rgb_data.push(chunk[0]);
-                    }
-
-                    if let Some(img) = RgbImage::from_raw(width as u32, height as u32, rgb_data) {
-                        if let Ok(_) = encoder.encode_image(&img) {
-                            if let Err(e) = ws_sender.send(Message::Binary(buffer)).await {
-                                debug!(error = %e, "Relay send failed");
-                                break;
-                            }
-                            frame_sent += 1;
-                        }
-                    }
-                    
-                    if last_status.elapsed().as_secs() >= 5 {
-                        info!("[STATUS] Uplink: {} fps", frame_sent / 5);
-                        frame_sent = 0;
-                        last_status = std::time::Instant::now();
-                    }
-                    sleep(Duration::from_millis(50)).await; // ~20fps
                 }
-                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                    sleep(Duration::from_millis(16)).await;
-                    continue;
-                }
-                Err(e) => {
-                    debug!(error = %e, "Capture error, resetting capturer");
-                    capturer_opt = None; 
-                    sleep(Duration::from_millis(100)).await;
-                    continue;
+                _ = &mut control_task => {
+                    break;
                 }
             }
         }
