@@ -25,6 +25,7 @@ pipeline {
                 sh '''
                     ${DOCKER_COMPOSE_BIN} -f ${DOCKER_COMPOSE_BASE_PATH}/docker-compose.prod.yml down --rmi all -v --remove-orphans || true
                     ${DOCKER_BIN} rmi -f self-control-proxy:${IMAGE_TAG} || true
+                    ${DOCKER_BIN} rmi -f self-control-web:${IMAGE_TAG} || true
                 '''
             }
         }
@@ -35,11 +36,21 @@ pipeline {
                 stage('Build Proxy Image') {
                     steps {
                         sh '''
-                            ${DOCKER_BIN} rmi -f self-control-proxy:${IMAGE_TAG} || true
                             ${DOCKER_BIN} build \
                                 -f ${DOCKER_BASE_PATH}/proxy.Dockerfile \
                                 -t self-control-proxy:${IMAGE_TAG} \
                                 ./proxy
+                        '''
+                    }
+                }
+
+                stage('Build Web Image') {
+                    steps {
+                        sh '''
+                            ${DOCKER_BIN} build \
+                                -f ${DOCKER_BASE_PATH}/web.Dockerfile \
+                                -t self-control-web:${IMAGE_TAG} \
+                                ./web
                         '''
                     }
                 }
