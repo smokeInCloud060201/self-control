@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, Loader2, Maximize2, Monitor } from 'lucide-react';
+import { AlertCircle, ClipboardPaste, Loader2, Maximize2, Monitor } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface RdpViewerProps {
@@ -86,6 +86,13 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                             if (json.type === 'metadata' && json.displays) {
                                 console.log('[DEBUG] Displays found:', json.displays);
                                 setDisplays(json.displays);
+                            } else if (json.type === 'clipboard_sync') {
+                                console.log('[DEBUG] Clipboard sync received');
+                                if (json.text) {
+                                    navigator.clipboard.writeText(json.text).catch(err => {
+                                        console.error('Failed to write to local clipboard:', err);
+                                    });
+                                }
                             }
                         } catch (e) { }
                     }
@@ -161,6 +168,13 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
+            // Intercept Shortcuts (Cmd+V on Mac, Ctrl+V otherwise)
+            const isMod = e.metaKey || e.ctrlKey;
+            if (isMod && e.key.toLowerCase() === 'v') {
+                syncClipboard();
+                return; // Don't send the V to the remote as it's handled by PasteText
+            }
+
             wsRef.current.send(JSON.stringify({
                 type: 'KeyDown',
                 key: e.key
@@ -185,6 +199,17 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
         if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({ type: 'switch_display', index }));
             setCurrentDisplay(index);
+        }
+    };
+
+    const syncClipboard = async () => {
+        try {
+            const text = await navigator.clipboard.readText();
+            if (text && wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({ type: 'paste_text', text }));
+            }
+        } catch (err) {
+            console.error('Failed to read clipboard:', err);
         }
     };
 
@@ -224,6 +249,16 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
 
                     <div className="flex items-center gap-3">
                         <span className="text-slate-600 font-mono text-[10px] uppercase tracking-widest mr-4">ID: {sessionId.slice(0, 8)}</span>
+
+                        <button
+                            onClick={syncClipboard}
+                            className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-2xl border border-white/10 transition-all group active:scale-95 text-[10px] font-black uppercase tracking-widest"
+                            title="Paste Local Clipboard to Remote"
+                        >
+                            <ClipboardPaste className="w-4 h-4 group-hover:text-blue-400 transition-colors" />
+                            Paste to Remote
+                        </button>
+
                         <button
                             onClick={toggleFullscreen}
                             className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-2xl border border-white/10 transition-all group active:scale-95 text-[10px] font-black uppercase tracking-widest"

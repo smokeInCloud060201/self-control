@@ -42,6 +42,8 @@ enum ControlEvent {
     KeyUp { key: String },
     #[serde(rename = "switch_display")]
     SwitchDisplay { index: usize },
+    #[serde(rename = "paste_text")]
+    PasteText { text: String },
 }
 
 use clap::Parser;
@@ -104,6 +106,7 @@ async fn main() -> Result<()> {
     let display_index_cap = display_index.clone();
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<ControlEvent>(100);
     let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
+    let (response_tx, mut response_rx) = tokio::sync::mpsc::channel::<serde_json::Value>(10);
     
     // Capture Thread (dedicated OS thread to avoid Tokio runtime conflicts)
     let is_streaming_cap = is_streaming.clone();
@@ -230,6 +233,7 @@ async fn main() -> Result<()> {
 
     // Input Handler Task
     let is_streaming_ctrl = is_streaming.clone();
+    let response_tx_ctrl = response_tx.clone();
     tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
             match event {
@@ -281,6 +285,7 @@ async fn main() -> Result<()> {
                     }).await.ok();
                 }
                 ControlEvent::KeyDown { key } => {
+                    let key_c = key.clone();
                     tokio::task::spawn_blocking(move || {
                         #[cfg(all(target_os = "windows", feature = "windows_service"))]
                         let _desktop_guard = windows_service::AutoDesktop::new();
@@ -291,6 +296,29 @@ async fn main() -> Result<()> {
                             enigo.key_down(k);
                         }
                     }).await.ok();
+
+                    // Shortcut Detection: Detect Copy (Cmd+C on Mac, Ctrl+C otherwise)
+                    // We trigger a "Check Clipboard" on every key down if it's 'c'.
+                    if key_c.to_lowercase() == "c" {
+                        let res_tx = response_tx_ctrl.clone();
+                        tokio::spawn(async move {
+                            // Wait for remote app to process the copy command
+                            sleep(Duration::from_millis(200)).await;
+                            
+                            #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                            let _desktop_guard = windows_service::AutoDesktop::new();
+
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                if let Ok(text) = clipboard.get_text() {
+                                    let msg = serde_json::json!({
+                                        "type": "clipboard_sync",
+                                        "text": text
+                                    });
+                                    let _ = res_tx.send(msg).await;
+                                }
+                            }
+                        });
+                    }
                 }
                 ControlEvent::KeyUp { key } => {
                     tokio::task::spawn_blocking(move || {
@@ -308,6 +336,30 @@ async fn main() -> Result<()> {
                     info!(index = index, "[SIGNAL] Switching to display");
                     let mut idx = display_index.lock().unwrap();
                     *idx = index;
+                }
+                ControlEvent::PasteText { text } => {
+                    tokio::task::spawn_blocking(move || {
+                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        let _desktop_guard = windows_service::AutoDesktop::new();
+
+                        // 1. Set clipboard
+                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                            let _ = clipboard.set_text(text);
+                        }
+
+                        // 2. Trigger Paste (Cmd+V on Mac, Ctrl+V otherwise)
+                        use enigo::{Key, KeyboardControllable};
+                        let mut enigo = Enigo::new();
+                        
+                        #[cfg(target_os = "macos")]
+                        let modifier = Key::Meta;
+                        #[cfg(not(target_os = "macos"))]
+                        let modifier = Key::Control;
+
+                        enigo.key_down(modifier);
+                        enigo.key_click(Key::Layout('v'));
+                        enigo.key_up(modifier);
+                    }).await.ok();
                 }
             }
         }
@@ -393,13 +445,21 @@ fn parse_key(key: &str) -> Option<enigo::Key> {
             }
         });
 
-        // Relay Frames To Proxy
+        // Relay Frames & Responses To Proxy
         loop {
             tokio::select! {
                 Some(buffer) = frame_rx.recv() => {
                     if let Err(e) = ws_sender.send(Message::Binary(buffer)).await {
                         debug!(error = %e, "Relay send failed");
                         break;
+                    }
+                }
+                Some(response) = response_rx.recv() => {
+                    if let Ok(text) = serde_json::to_string(&response) {
+                        if let Err(e) = ws_sender.send(Message::Text(text)).await {
+                            debug!(error = %e, "Response relay failed");
+                            break;
+                        }
                     }
                 }
                 _ = &mut control_task => {
