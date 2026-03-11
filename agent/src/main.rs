@@ -14,6 +14,8 @@ use rand::{thread_rng, Rng};
 use tracing::{info, warn, error, debug, Level};
 use tracing_subscriber::EnvFilter;
 use thiserror::Error;
+mod macos_session;
+mod windows_service;
 
 #[derive(Error, Debug)]
 pub enum AgentError {
@@ -48,6 +50,8 @@ struct Args {
     server: String,
     #[arg(short, long, default_value_t = 8080, env = "PROXY_PORT")]
     port: u16,
+    #[arg(long)]
+    service: bool,
 }
 
 #[tokio::main]
@@ -77,13 +81,19 @@ async fn main() -> Result<()> {
             machine_uid::get().unwrap_or_else(|_| "unknown-machine".to_string())
         });
     let mut rng = thread_rng();
-    let password: u32 = rng.gen_range(100000..999999);
-    let password_str = password.to_string();
+    let password_str = if args.service {
+        "admin123".to_string() // Static password for service mode for now
+    } else {
+        rng.gen_range(100000..999999).to_string()
+    };
 
     info!("========================================");
     info!("   RUST REMOTE AGENT v2.5");
     info!("   MACHINE ID: {}", machine_id);
     info!("   PASSWORD:   {}", password_str);
+    if args.service {
+        info!("   MODE:       SYSTEM SERVICE");
+    }
     info!("========================================");
 
     let is_streaming = Arc::new(Mutex::new(false));
@@ -98,6 +108,9 @@ async fn main() -> Result<()> {
         let mut frame_sent = 0;
 
         loop {
+            #[cfg(all(target_os = "windows", feature = "windows_service"))]
+            let _desktop_guard = windows_service::AutoDesktop::new();
+
             let streaming = { *is_streaming_cap.lock().unwrap() };
             if !streaming {
                 capturer_opt = None;
@@ -156,7 +169,12 @@ async fn main() -> Result<()> {
                     }
                     
                     if last_status.elapsed().as_secs() >= 5 {
-                        info!("[STATUS] Uplink: {} fps", frame_sent / 5);
+                        let login_window = macos_session::is_login_window();
+                        if login_window {
+                            info!("[STATUS] Uplink: {} fps (LOGIN WINDOW DETECTED)", frame_sent / 5);
+                        } else {
+                            info!("[STATUS] Uplink: {} fps", frame_sent / 5);
+                        }
                         frame_sent = 0;
                         last_status = std::time::Instant::now();
                     }
@@ -191,6 +209,9 @@ async fn main() -> Result<()> {
                 }
                 ControlEvent::MouseMove { x, y } => {
                     tokio::task::spawn_blocking(move || {
+                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        let _desktop_guard = windows_service::AutoDesktop::new();
+
                         if let Ok(display) = Display::primary() {
                             let mut enigo = Enigo::new();
                             let lx = x * display.logical_width() as f32;
@@ -202,6 +223,9 @@ async fn main() -> Result<()> {
                 ControlEvent::MouseDown { button } => {
                     let btn = if button == "right" { MouseButton::Right } else { MouseButton::Left };
                     tokio::task::spawn_blocking(move || {
+                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        let _desktop_guard = windows_service::AutoDesktop::new();
+
                         let mut enigo = Enigo::new();
                         enigo.mouse_down(btn);
                     }).await.ok();
@@ -209,12 +233,18 @@ async fn main() -> Result<()> {
                 ControlEvent::MouseUp { button } => {
                     let btn = if button == "right" { MouseButton::Right } else { MouseButton::Left };
                     tokio::task::spawn_blocking(move || {
+                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        let _desktop_guard = windows_service::AutoDesktop::new();
+
                         let mut enigo = Enigo::new();
                         enigo.mouse_up(btn);
                     }).await.ok();
                 }
                 ControlEvent::KeyDown { key } => {
                     tokio::task::spawn_blocking(move || {
+                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        let _desktop_guard = windows_service::AutoDesktop::new();
+
                         use enigo::KeyboardControllable;
                         let mut enigo = Enigo::new();
                         if let Some(k) = parse_key(&key) {
@@ -224,6 +254,9 @@ async fn main() -> Result<()> {
                 }
                 ControlEvent::KeyUp { key } => {
                     tokio::task::spawn_blocking(move || {
+                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        let _desktop_guard = windows_service::AutoDesktop::new();
+
                         use enigo::KeyboardControllable;
                         let mut enigo = Enigo::new();
                         if let Some(k) = parse_key(&key) {

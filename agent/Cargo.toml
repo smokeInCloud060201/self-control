@@ -22,3 +22,20 @@ thiserror = "1.0"
 clap = { version = "4.4", features = ["derive", "env"] }
 dotenvy = "0.15"
 local-ip-address = "0.6"
+core-graphics = { version = "0.23", optional = true }
+core-foundation = { version = "0.9", optional = true }
+windows-service = { version = "0.7", optional = true }
+windows = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_StationsAndDesktops",
+], optional = true }
+
+[features]
+default = []
+macos_service = ["core-graphics", "core-foundation"]
+windows_service = ["windows-service", "windows"]

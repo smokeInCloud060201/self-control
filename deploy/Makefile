@@ -17,3 +17,14 @@ local-up:
 
 local-down:
 	$(DOCKER_COMPOSE_BIN) -f docker-compose.local.yml -p $(PROJECT_NAME) down
+
+macos-service-install:
+	cd ../agent && cargo build --release --features macos_service
+	sudo cp ../agent/target/release/agent /usr/local/bin/self-control-agent
+	sudo cp ../agent/com.selfcontrol.agent.plist /Library/LaunchDaemons/
+	sudo launchctl load /Library/LaunchDaemons/com.selfcontrol.agent.plist
+
+macos-service-uninstall:
+	sudo launchctl unload /Library/LaunchDaemons/com.selfcontrol.agent.plist
+	sudo rm /Library/LaunchDaemons/com.selfcontrol.agent.plist
+	sudo rm /usr/local/bin/self-control-agent

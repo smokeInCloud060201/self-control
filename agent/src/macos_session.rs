@@ -1,0 +1,44 @@
+#[cfg(all(target_os = "macos", feature = "macos_service"))]
+use core_foundation::dictionary::CFDictionary;
+#[cfg(all(target_os = "macos", feature = "macos_service"))]
+use core_foundation::string::CFString;
+#[cfg(all(target_os = "macos", feature = "macos_service"))]
+use core_foundation::base::{TCFType, CFTypeRef};
+
+#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGSessionCopyCurrentDictionary() -> CFTypeRef;
+}
+
+#[cfg(all(target_os = "macos", feature = "macos_service"))]
+pub fn is_login_window() -> bool {
+    unsafe {
+        let dict_ptr = CGSessionCopyCurrentDictionary();
+        if dict_ptr.is_null() {
+            return false;
+        }
+        
+        // Wrap the pointer into a CFDictionary
+        let dict: CFDictionary<CFString, CFTypeRef> = TCFType::wrap_under_create_rule(dict_ptr as *const _);
+        
+        // Key for checking the session username
+        let key = CFString::from_static_string("kCGSessionUserNameKey");
+        
+        match dict.find(&key) {
+            Some(name_ptr) => {
+                // name_ptr is an ItemRef<'_, CFTypeRef>
+                // We wrap it as a CFString
+                let name = CFString::wrap_under_get_rule(*name_ptr as *const _);
+                let name_str = name.to_string();
+                name_str == "loginwindow"
+            }
+            None => false,
+        }
+    }
+}
+
+#[cfg(not(all(target_os = "macos", feature = "macos_service")))]
+pub fn is_login_window() -> bool {
+    false
+}
