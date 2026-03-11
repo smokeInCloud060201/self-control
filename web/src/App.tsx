@@ -45,8 +45,8 @@ function App() {
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 h-[calc(100vh-5rem)]">
-        <div className="grid lg:grid-cols-12 gap-12 items-start h-full">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 min-h-[calc(100vh-4rem)]">
+        <div className="grid lg:grid-cols-12 gap-8 lg:gap-12 items-start h-full">
 
           {/* Left Column: UI & Controls */}
           <div className="lg:col-span-5 space-y-8">
@@ -55,8 +55,8 @@ function App() {
                 <Activity className="w-4 h-4" />
                 <span>Ultra-low latency streaming active</span>
               </div>
-              <h1 className="text-6xl font-black tracking-tight text-white leading-[1.1]">
-                Modern Remote <br />
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white leading-[1.1]">
+                  Modern Remote {" "}
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500">
                   Control Hub
                 </span>
@@ -69,7 +69,7 @@ function App() {
             {!isConnected ? (
               <form
                 onSubmit={handleConnect}
-                className="relative group overflow-hidden bg-slate-900/40 backdrop-blur-xl p-8 rounded-3xl border border-white/5 shadow-2xl space-y-8 transition-all hover:border-blue-500/30"
+                className="relative group overflow-hidden bg-slate-900/40 backdrop-blur-xl p-6 sm:p-8 rounded-3xl border border-white/5 shadow-2xl space-y-8 transition-all hover:border-blue-500/30"
               >
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent pointer-events-none" />
 
@@ -134,8 +134,7 @@ function App() {
             )}
           </div>
 
-          {/* Right Column: Viewer */}
-          <div className="lg:col-span-7 h-full min-h-[500px]">
+          <div className="lg:col-span-7 h-full min-h-[400px] sm:min-h-[500px]">
             {isConnected ? (
               <RdpViewer
                 sessionId={machineId}

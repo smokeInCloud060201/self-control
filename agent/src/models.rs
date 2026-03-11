@@ -18,4 +18,6 @@ pub enum ControlEvent {
     PasteText { text: String },
     #[serde(rename = "resolution_update")]
     ResolutionUpdate { width: usize, height: usize },
+    #[serde(rename = "mouse_wheel")]
+    MouseWheel { delta_x: i32, delta_y: i32 },
 }

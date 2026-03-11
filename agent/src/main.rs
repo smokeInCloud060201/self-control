@@ -206,6 +206,20 @@ async fn main() -> Result<()> {
                         }
                     }).await.ok();
                 }
+                ControlEvent::MouseWheel { delta_x, delta_y } => {
+                    tokio::task::spawn_blocking(move || {
+                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        let _desktop_guard = sys::windows_service::AutoDesktop::new();
+                        use enigo::MouseControllable;
+                        let mut enigo = enigo::Enigo::new();
+                        if delta_x != 0 {
+                            enigo.mouse_scroll_x(delta_x);
+                        }
+                        if delta_y != 0 {
+                            enigo.mouse_scroll_y(delta_y);
+                        }
+                    }).await.ok();
+                }
             }
         }
     });

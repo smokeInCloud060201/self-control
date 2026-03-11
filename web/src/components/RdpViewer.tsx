@@ -20,6 +20,9 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     const [currentDisplay, setCurrentDisplay] = useState<number>(0);
     const audioContextRef = useRef<AudioContext | null>(null);
     const nextAudioTimeRef = useRef<number>(0);
+    const longPressTimerRef = useRef<number | null>(null);
+    const lastTouchPosRef = useRef<{ x: number, y: number } | null>(null);
+    const isScrollingRef = useRef<boolean>(false);
 
     const toggleFullscreen = () => {
         if (containerRef.current) {
@@ -186,15 +189,113 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
         }
     };
 
+    const getScaledCoordinates = (clientX: number, clientY: number) => {
+        if (!canvasRef.current) return null;
+        const rect = canvasRef.current.getBoundingClientRect();
+        const x = (clientX - rect.left) / rect.width;
+        const y = (clientY - rect.top) / rect.height;
+        return { x, y };
+    };
+
     const handleMouseMove = (e: React.MouseEvent) => {
         startInteracting();
-        if (wsRef.current?.readyState === WebSocket.OPEN && canvasRef.current) {
-            const rect = canvasRef.current.getBoundingClientRect();
-            // Using nativeEvent.offsetX is more accurate relative to the content area
-            const x = e.nativeEvent.offsetX / rect.width;
-            const y = e.nativeEvent.offsetY / rect.height;
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+            const coords = getScaledCoordinates(e.clientX, e.clientY);
+            if (coords) {
+                wsRef.current.send(JSON.stringify({ type: 'MouseMove', ...coords }));
+            }
+        }
+    };
 
-            wsRef.current.send(JSON.stringify({ type: 'MouseMove', x, y }));
+    const handleTouchStart = (e: React.TouchEvent) => {
+        startInteracting();
+        if (wsRef.current?.readyState === WebSocket.OPEN && e.touches.length > 0) {
+            const touch = e.touches[0];
+            const coords = getScaledCoordinates(touch.clientX, touch.clientY);
+            if (coords) {
+                // Always sync position first
+                wsRef.current.send(JSON.stringify({ type: 'MouseMove', ...coords }));
+                lastTouchPosRef.current = { x: touch.clientX, y: touch.clientY };
+
+                if (e.touches.length === 1) {
+                    isScrollingRef.current = false;
+                    // Start long press timer for right click
+                    longPressTimerRef.current = window.setTimeout(() => {
+                        if (wsRef.current?.readyState === WebSocket.OPEN) {
+                            wsRef.current.send(JSON.stringify({ type: 'MouseDown', button: 'right' }));
+                            // We don't send a matching MouseUp immediately to allow dragging if the agent supports it, 
+                            // but usually context menu triggers on MouseDown or Click. 
+                            // For simplicity, let's treat long press as a right-click "down".
+                        }
+                        longPressTimerRef.current = null;
+                    }, 500);
+
+                    wsRef.current.send(JSON.stringify({ type: 'MouseDown', button: 'left' }));
+                } else if (e.touches.length === 2) {
+                    isScrollingRef.current = true;
+                    // Cancel left click if we transition to 2-finger scroll
+                    if (longPressTimerRef.current) {
+                        clearTimeout(longPressTimerRef.current);
+                        longPressTimerRef.current = null;
+                    }
+                    wsRef.current.send(JSON.stringify({ type: 'MouseUp', button: 'left' }));
+                }
+            }
+        }
+    };
+
+    const handleTouchMove = (e: React.TouchEvent) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN && e.touches.length > 0) {
+            const touch = e.touches[0];
+            const coords = getScaledCoordinates(touch.clientX, touch.clientY);
+            
+            if (coords) {
+                if (e.touches.length === 1 && !isScrollingRef.current) {
+                    // If we move significantly, cancel the long press
+                    if (lastTouchPosRef.current) {
+                        const dist = Math.hypot(touch.clientX - lastTouchPosRef.current.x, touch.clientY - lastTouchPosRef.current.y);
+                        if (dist > 10 && longPressTimerRef.current) {
+                            clearTimeout(longPressTimerRef.current);
+                            longPressTimerRef.current = null;
+                        }
+                    }
+                    wsRef.current.send(JSON.stringify({ type: 'MouseMove', ...coords }));
+                } else if (e.touches.length === 2 && lastTouchPosRef.current) {
+                    const deltaX = (touch.clientX - lastTouchPosRef.current.x);
+                    const deltaY = (touch.clientY - lastTouchPosRef.current.y);
+                    
+                    // Send inverted scroll for more natural touch feel (swipe up to scroll down)
+                    wsRef.current.send(JSON.stringify({ 
+                        type: 'mouse_wheel', 
+                        delta_x: Math.round(deltaX / 5), 
+                        delta_y: Math.round(deltaY / 5) 
+                    }));
+                }
+                
+                lastTouchPosRef.current = { x: touch.clientX, y: touch.clientY };
+                if (e.cancelable) e.preventDefault();
+            }
+        }
+    };
+
+    const handleTouchEnd = (e: React.TouchEvent) => {
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+            if (!isScrollingRef.current) {
+                // If we were in a right-click state, we might need a mouse up for that, 
+                // but for now let's just ensure left-click is up.
+                wsRef.current.send(JSON.stringify({ type: 'MouseUp', button: 'left' }));
+                wsRef.current.send(JSON.stringify({ type: 'MouseUp', button: 'right' }));
+            }
+        }
+        
+        if (e.touches.length === 0) {
+            isScrollingRef.current = false;
+            lastTouchPosRef.current = null;
         }
     };
 
@@ -266,9 +367,9 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     return (
         <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto">
             {status === 'connected' && (
-                <div className="flex flex-wrap items-center justify-between gap-4 px-8 py-4 bg-slate-900/50 backdrop-blur-xl border border-white/5 rounded-[2rem] shadow-2xl animate-in slide-in-from-top-4 duration-700">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 sm:px-8 py-4 bg-slate-900/50 backdrop-blur-xl border border-white/5 rounded-2xl sm:rounded-[2rem] shadow-2xl animate-in slide-in-from-top-4 duration-700">
                     <div className="flex items-center gap-6">
-                        <div className="flex items-center gap-3 px-4 py-2 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
+                        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 bg-blue-500/10 border border-blue-500/20 rounded-xl sm:rounded-2xl">
                             <div className="relative">
                                 <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping absolute inset-0" />
                                 <div className="w-2.5 h-2.5 bg-green-500 rounded-full relative" />
@@ -283,7 +384,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                                         key={i}
                                         onClick={() => switchDisplay(i)}
                                         className={cn(
-                                            "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all gap-2 flex items-center min-w-[100px] justify-center",
+                                            "px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all gap-2 flex items-center min-w-[80px] sm:min-w-[100px] justify-center",
                                             currentDisplay === i
                                                 ? "bg-white text-slate-950 shadow-xl scale-105"
                                                 : "text-slate-500 hover:text-white hover:bg-white/5"
@@ -298,24 +399,24 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <span className="text-slate-600 font-mono text-[10px] uppercase tracking-widest mr-4">ID: {sessionId.slice(0, 8)}</span>
+                        <span className="hidden md:inline text-slate-600 font-mono text-[10px] uppercase tracking-widest mr-4">ID: {sessionId.slice(0, 8)}</span>
 
                         <button
                             onClick={syncClipboard}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-2xl border border-white/10 transition-all group active:scale-95 text-[10px] font-black uppercase tracking-widest"
+                            className="flex items-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl sm:rounded-2xl border border-white/10 transition-all group active:scale-95 text-[9px] sm:text-[10px] font-black uppercase tracking-widest"
                             title="Paste Local Clipboard to Remote"
                         >
-                            <ClipboardPaste className="w-4 h-4 group-hover:text-blue-400 transition-colors" />
-                            Paste to Remote
+                            <ClipboardPaste className="w-3.5 h-3.5 sm:w-4 h-4 group-hover:text-blue-400 transition-colors" />
+                            <span className="hidden xs:inline">Paste to Remote</span>
                         </button>
 
                         <button
                             onClick={toggleFullscreen}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-2xl border border-white/10 transition-all group active:scale-95 text-[10px] font-black uppercase tracking-widest"
+                            className="flex items-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl sm:rounded-2xl border border-white/10 transition-all group active:scale-95 text-[9px] sm:text-[10px] font-black uppercase tracking-widest"
                             title="Fullscreen"
                         >
-                            <Maximize2 className="w-4 h-4 group-hover:text-blue-400 transition-colors" />
-                            Fullscreen
+                            <Maximize2 className="w-3.5 h-3.5 sm:w-4 h-4 group-hover:text-blue-400 transition-colors" />
+                            <span className="hidden xs:inline">Fullscreen</span>
                         </button>
                     </div>
                 </div>
@@ -325,7 +426,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                 ref={containerRef}
                 style={{ aspectRatio: `${aspectRatio}` }}
                 className={cn(
-                    "relative w-full bg-slate-950 rounded-[3rem] overflow-hidden border border-white/5 shadow-[0_0_100px_-20px_rgba(0,0,0,0.5)] transition-all outline-none",
+                    "relative w-full bg-slate-950 rounded-2xl sm:rounded-[3rem] overflow-hidden border border-white/5 shadow-[0_0_100px_-20px_rgba(0,0,0,0.5)] transition-all outline-none",
                     status === 'connected' ? "ring-1 ring-white/10" : ""
                 )}
             >
@@ -370,6 +471,9 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                         handleMouseDown(e.button === 0 ? 'left' : 'right');
                     }}
                     onMouseUp={(e) => handleMouseUp(e.button === 0 ? 'left' : 'right')}
+                    onTouchStart={handleTouchStart}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
                     onKeyDown={handleKeyDown}
                     onKeyUp={handleKeyUp}
                     onContextMenu={(e) => e.preventDefault()}
