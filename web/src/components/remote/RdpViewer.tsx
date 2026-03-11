@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, ClipboardPaste, Loader2, Maximize2, Monitor } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { AlertCircle, ClipboardPaste, Loader2, LogOut, Maximize2, Monitor } from 'lucide-react';
+import { cn } from '../../lib/utils';
 
 interface RdpViewerProps {
     sessionId: string;
@@ -13,6 +13,8 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
+    const [showToolbar, setShowToolbar] = useState(false);
+    const toolbarTimerRef = useRef<number | null>(null);
     const [error, setError] = useState<string | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
     const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
@@ -199,6 +201,31 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
 
     const handleMouseMove = (e: React.MouseEvent) => {
         startInteracting();
+        
+        // Auto-show toolbar when mouse is near top
+        if (status === 'connected') {
+            const rect = containerRef.current?.getBoundingClientRect();
+            if (rect) {
+                const relativeY = e.clientY - rect.top;
+                // Show if in top 100px, hide immediately if below
+                if (relativeY < 100) {
+                    setShowToolbar(true);
+                    if (toolbarTimerRef.current) {
+                        window.clearTimeout(toolbarTimerRef.current);
+                        toolbarTimerRef.current = null;
+                    }
+                } else {
+                    // Slight delay to prevent flickering when transitioning out of toolbar
+                    if (!toolbarTimerRef.current) {
+                        toolbarTimerRef.current = window.setTimeout(() => {
+                            setShowToolbar(false);
+                            toolbarTimerRef.current = null;
+                        }, 300); // Faster hide: 300ms instead of 2000ms
+                    }
+                }
+            }
+        }
+
         if (wsRef.current?.readyState === WebSocket.OPEN) {
             const coords = getScaledCoordinates(e.clientX, e.clientY);
             if (coords) {
@@ -365,9 +392,12 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     };
 
     return (
-        <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto">
+        <div className="relative w-full h-full group/viewer">
             {status === 'connected' && (
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 sm:px-8 py-4 bg-slate-900/50 backdrop-blur-xl border border-white/5 rounded-2xl sm:rounded-[2rem] shadow-2xl animate-in slide-in-from-top-4 duration-700">
+                <div className={cn(
+                    "absolute top-6 left-1/2 -translate-x-1/2 z-50 flex flex-col sm:flex-row items-center justify-between gap-4 px-4 sm:px-8 py-4 bg-slate-900/80 backdrop-blur-2xl border border-white/10 rounded-2xl sm:rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] transition-all duration-500 ease-out",
+                    showToolbar ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-12 pointer-events-none"
+                )}>
                     <div className="flex items-center gap-6">
                         <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 bg-blue-500/10 border border-blue-500/20 rounded-xl sm:rounded-2xl">
                             <div className="relative">
@@ -377,7 +407,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                             <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em]">Active Session</span>
                         </div>
 
-                        {displays.length > 1 && (
+                        {displays.length > 0 && (
                             <div className="flex items-center bg-slate-950/40 p-1 rounded-2xl border border-white/5">
                                 {displays.map((_, i) => (
                                     <button
@@ -418,6 +448,15 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                             <Maximize2 className="w-3.5 h-3.5 sm:w-4 h-4 group-hover:text-blue-400 transition-colors" />
                             <span className="hidden xs:inline">Fullscreen</span>
                         </button>
+
+                        <button
+                            onClick={() => onDisconnect?.()}
+                            className="flex items-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl sm:rounded-2xl border border-red-500/20 transition-all group active:scale-95 text-[9px] sm:text-[10px] font-black uppercase tracking-widest"
+                            title="Terminate Session"
+                        >
+                            <LogOut className="w-3.5 h-3.5 sm:w-4 h-4 group-hover:text-red-400 transition-colors" />
+                            <span className="hidden md:inline">Terminate</span>
+                        </button>
                     </div>
                 </div>
             )}
@@ -429,6 +468,16 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                     "relative w-full bg-slate-950 rounded-2xl sm:rounded-[3rem] overflow-hidden border border-white/5 shadow-[0_0_100px_-20px_rgba(0,0,0,0.5)] transition-all outline-none",
                     status === 'connected' ? "ring-1 ring-white/10" : ""
                 )}
+                onMouseMove={handleMouseMove}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onMouseDown={(e) => {
+                    const canvas = canvasRef.current;
+                    if (canvas) canvas.focus();
+                    handleMouseDown(e.button === 0 ? 'left' : 'right');
+                }}
+                onMouseUp={(e) => handleMouseUp(e.button === 0 ? 'left' : 'right')}
             >
                 {status === 'connecting' && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-2xl z-20">
@@ -465,15 +514,6 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                     )}
                     id="remote-canvas"
                     tabIndex={0}
-                    onMouseMove={handleMouseMove}
-                    onMouseDown={(e) => {
-                        e.currentTarget.focus();
-                        handleMouseDown(e.button === 0 ? 'left' : 'right');
-                    }}
-                    onMouseUp={(e) => handleMouseUp(e.button === 0 ? 'left' : 'right')}
-                    onTouchStart={handleTouchStart}
-                    onTouchMove={handleTouchMove}
-                    onTouchEnd={handleTouchEnd}
                     onKeyDown={handleKeyDown}
                     onKeyUp={handleKeyUp}
                     onContextMenu={(e) => e.preventDefault()}

@@ -62,6 +62,10 @@ button {
   transition: border-color 0.25s;
 }
 
+#root {
+  flex: 1;
+}
+
 button:hover {
   border-color: #646cff;
 }

@@ -80,6 +80,25 @@ async fn main() -> Result<()> {
                     info!("[SIGNAL] Starting Capture loop");
                     let mut s = is_streaming_ctrl.lock().unwrap();
                     *s = true;
+
+                    // Send display metadata whenever a client joins
+                    let res_tx = response_tx_ctrl.clone();
+                    tokio::spawn(async move {
+                        if let Ok(displays) = scrap::Display::all() {
+                            let metadata = serde_json::json!({
+                                "type": "metadata",
+                                "displays": displays.iter().enumerate().map(|(i, d)| {
+                                    serde_json::json!({
+                                        "index": i,
+                                        "width": d.width(),
+                                        "height": d.height(),
+                                        "is_primary": i == 0
+                                    })
+                                }).collect::<Vec<_>>()
+                            });
+                            let _ = res_tx.send(metadata).await;
+                        }
+                    });
                 }
                 ControlEvent::StopCapture => {
                     info!("[SIGNAL] Stopping Capture loop (Idle mode)");
