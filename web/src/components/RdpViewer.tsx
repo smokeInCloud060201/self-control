@@ -55,6 +55,15 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                 ws.onopen = () => {
                     if (isCleanup) { ws.close(); return; }
                     setStatus('connected');
+
+                    // Send client resolution to Agent for adaptive workspace
+                    const width = window.screen.width * window.devicePixelRatio;
+                    const height = window.screen.height * window.devicePixelRatio;
+                    ws.send(JSON.stringify({
+                        type: 'resolution_update',
+                        width: Math.round(width),
+                        height: Math.round(height)
+                    }));
                 };
 
                 ws.onmessage = async (event) => {

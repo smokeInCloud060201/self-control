@@ -44,6 +44,8 @@ enum ControlEvent {
     SwitchDisplay { index: usize },
     #[serde(rename = "paste_text")]
     PasteText { text: String },
+    #[serde(rename = "resolution_update")]
+    ResolutionUpdate { width: usize, height: usize },
 }
 
 use clap::Parser;
@@ -361,9 +363,59 @@ async fn main() -> Result<()> {
                         enigo.key_up(modifier);
                     }).await.ok();
                 }
+                ControlEvent::ResolutionUpdate { width, height } => {
+                    let d_idx = display_index.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let idx = { *d_idx.lock().unwrap() };
+                        info!(width = width, height = height, index = idx, "[SIGNAL] Updating Resolution");
+                        if let Err(e) = set_resolution(idx, width, height) {
+                            error!(error = %e, "Failed to update resolution");
+                        }
+                    }).await.ok();
+                }
             }
         }
     });
+
+fn set_resolution(display_index: usize, width: usize, height: usize) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, we'll log the request. In a full implementation we would use CoreGraphics display modes.
+        info!("Resolution switch requested for macOS display {} to {}x{} (Implementation pending)", display_index, width, height);
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Graphics::Gdi::{EnumDisplaySettingsW, ChangeDisplaySettingsExW, DEVMODEW, ENUM_CURRENT_SETTINGS, CDS_UPDATEREGISTRY, DISP_CHANGE_SUCCESSFUL};
+
+        unsafe {
+            let mut dev_mode: DEVMODEW = std::mem::zeroed();
+            dev_mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+
+            if EnumDisplaySettingsW(None, ENUM_CURRENT_SETTINGS, &mut dev_mode).as_bool() {
+                dev_mode.dmPelsWidth = width as u32;
+                dev_mode.dmPelsHeight = height as u32;
+                dev_mode.dmFields = windows::Win32::Graphics::Gdi::DM_PELSWIDTH | windows::Win32::Graphics::Gdi::DM_PELSHEIGHT;
+
+                let result = ChangeDisplaySettingsExW(None, Some(&dev_mode), None, CDS_UPDATEREGISTRY, None);
+                if result == DISP_CHANGE_SUCCESSFUL {
+                    info!("Resolution changed successfully to {}x{}", width, height);
+                    Ok(())
+                } else {
+                    anyhow::bail!("Failed to change resolution: {:?}", result)
+                }
+            } else {
+                anyhow::bail!("Failed to enum display settings")
+            }
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        anyhow::bail!("Resolution switching not supported on this platform")
+    }
+}
 
 fn parse_key(key: &str) -> Option<enigo::Key> {
     use enigo::Key;
