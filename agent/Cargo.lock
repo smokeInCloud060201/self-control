@@ -14,6 +14,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "block",
+ "cc",
  "clap",
  "core-foundation 0.9.4",
  "core-graphics",
@@ -26,6 +28,7 @@ dependencies = [
  "lazy_static",
  "local-ip-address",
  "machine-uid",
+ "objc",
  "rand",
  "scrap",
  "serde",
