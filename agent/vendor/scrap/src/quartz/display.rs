@@ -48,6 +48,14 @@ impl Display {
         unsafe { CGDisplayBounds(self.0).size.height as usize }
     }
 
+    pub fn origin_x(self) -> i32 {
+        unsafe { CGDisplayBounds(self.0).origin.x as i32 }
+    }
+
+    pub fn origin_y(self) -> i32 {
+        unsafe { CGDisplayBounds(self.0).origin.y as i32 }
+    }
+
     pub fn is_builtin(self) -> bool {
         unsafe { CGDisplayIsBuiltin(self.0) != 0 }
     }

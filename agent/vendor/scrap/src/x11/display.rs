@@ -2,7 +2,7 @@ use std::rc::Rc;
 use super::Server;
 use super::ffi::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Display {
     server: Rc<Server>,
     default: bool,

@@ -7,6 +7,7 @@ use tokio::time::sleep;
 use tokio_tungstenite::connect_async_with_config;
 use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
 use image::{RgbImage, codecs::jpeg::JpegEncoder};
+use crc32fast::Hasher;
 use serde::{Deserialize, Serialize};
 use enigo::{Enigo, MouseButton, MouseControllable};
 use std::sync::{Arc, Mutex};
@@ -39,6 +40,8 @@ enum ControlEvent {
     MouseUp { button: String },
     KeyDown { key: String },
     KeyUp { key: String },
+    #[serde(rename = "switch_display")]
+    SwitchDisplay { index: usize },
 }
 
 use clap::Parser;
@@ -97,6 +100,8 @@ async fn main() -> Result<()> {
     info!("========================================");
 
     let is_streaming = Arc::new(Mutex::new(false));
+    let display_index = Arc::new(Mutex::new(0usize));
+    let display_index_cap = display_index.clone();
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<ControlEvent>(100);
     let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
     
@@ -106,10 +111,22 @@ async fn main() -> Result<()> {
         let mut capturer_opt: Option<Capturer> = None;
         let mut last_status = std::time::Instant::now();
         let mut frame_sent = 0;
+        let mut last_frame_hash: u32 = 0;
+
+        let mut current_display_idx = 0;
 
         loop {
             #[cfg(all(target_os = "windows", feature = "windows_service"))]
             let _desktop_guard = windows_service::AutoDesktop::new();
+
+            // 0. Check if display index changed
+            let target_display_idx = { *display_index_cap.lock().unwrap() };
+            if target_display_idx != current_display_idx {
+                info!(new_index = target_display_idx, "Display switch requested");
+                capturer_opt = None;
+                current_display_idx = target_display_idx;
+                last_frame_hash = 0; // Force full frame on switch
+            }
 
             let streaming = { *is_streaming_cap.lock().unwrap() };
             if !streaming {
@@ -119,22 +136,28 @@ async fn main() -> Result<()> {
             }
 
             if capturer_opt.is_none() {
-                match Display::primary() {
-                    Ok(display) => {
-                        match Capturer::new(display) {
-                            Ok(c) => {
-                                info!(width = c.width(), height = c.height(), "Capturer initialized");
-                                capturer_opt = Some(c);
+                match Display::all() {
+                    Ok(displays) => {
+                        if let Some(display) = displays.get(current_display_idx).or_else(|| displays.first()) {
+                            match Capturer::new((*display).clone()) {
+                                Ok(c) => {
+                                    info!(width = c.width(), height = c.height(), index = current_display_idx, "Capturer initialized");
+                                    capturer_opt = Some(c);
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, "Capturer init failed, retrying");
+                                    std::thread::sleep(Duration::from_millis(500));
+                                    continue;
+                                }
                             }
-                            Err(e) => {
-                                warn!(error = %e, "Capturer init failed, retrying");
-                                std::thread::sleep(Duration::from_millis(500));
-                                continue;
-                            }
+                        } else {
+                            warn!("No displays found");
+                            std::thread::sleep(Duration::from_millis(1000));
+                            continue;
                         }
                     }
                     Err(e) => {
-                        warn!(error = %e, "Display link lost, retrying");
+                        warn!(error = %e, "Display enumeration failed");
                         std::thread::sleep(Duration::from_millis(500));
                         continue;
                     }
@@ -149,14 +172,27 @@ async fn main() -> Result<()> {
                     let expected = width * height * 4;
                     if frame.len() < expected { continue; }
 
+                    // 1. Calculate Hash to detect changes
+                    let mut hasher = Hasher::new();
+                    hasher.update(&frame[..expected]);
+                    let current_hash = hasher.finalize();
+
+                    if current_hash == last_frame_hash {
+                        // Skip frame if identical
+                        std::thread::sleep(Duration::from_millis(10)); 
+                        continue;
+                    }
+                    last_frame_hash = current_hash;
+
                     let mut buffer = Vec::new();
-                    let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 50);
+                    // 2. Use JPEG with tuned quality
+                    let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 40);
                     
-                    let mut rgb_data = Vec::with_capacity(width * height * 3);
-                    for chunk in frame[..expected].chunks_exact(4) {
-                        rgb_data.push(chunk[2]);
-                        rgb_data.push(chunk[1]);
-                        rgb_data.push(chunk[0]);
+                    let mut rgb_data = vec![0u8; width * height * 3];
+                    for (i, chunk) in frame[..expected].chunks_exact(4).enumerate() {
+                        rgb_data[i * 3] = chunk[2];
+                        rgb_data[i * 3 + 1] = chunk[1];
+                        rgb_data[i * 3 + 2] = chunk[0];
                     }
 
                     if let Some(img) = RgbImage::from_raw(width as u32, height as u32, rgb_data) {
@@ -178,7 +214,7 @@ async fn main() -> Result<()> {
                         frame_sent = 0;
                         last_status = std::time::Instant::now();
                     }
-                    std::thread::sleep(Duration::from_millis(50));
+                    std::thread::sleep(Duration::from_millis(10));
                 }
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(16));
@@ -208,15 +244,19 @@ async fn main() -> Result<()> {
                     *s = false;
                 }
                 ControlEvent::MouseMove { x, y } => {
+                    let d_idx = display_index.clone();
                     tokio::task::spawn_blocking(move || {
                         #[cfg(all(target_os = "windows", feature = "windows_service"))]
                         let _desktop_guard = windows_service::AutoDesktop::new();
 
-                        if let Ok(display) = Display::primary() {
-                            let mut enigo = Enigo::new();
-                            let lx = x * display.logical_width() as f32;
-                            let ly = y * display.logical_height() as f32;
-                            enigo.mouse_move_to(lx as i32, ly as i32);
+                        let idx = { *d_idx.lock().unwrap() };
+                        if let Ok(displays) = Display::all() {
+                            if let Some(display) = displays.get(idx).or_else(|| displays.first()) {
+                                let mut enigo = Enigo::new();
+                                let lx = x * display.logical_width() as f32 + display.origin_x() as f32;
+                                let ly = y * display.logical_height() as f32 + display.origin_y() as f32;
+                                enigo.mouse_move_to(lx as i32, ly as i32);
+                            }
                         }
                     }).await.ok();
                 }
@@ -264,6 +304,11 @@ async fn main() -> Result<()> {
                         }
                     }).await.ok();
                 }
+                ControlEvent::SwitchDisplay { index } => {
+                    info!(index = index, "[SIGNAL] Switching to display");
+                    let mut idx = display_index.lock().unwrap();
+                    *idx = index;
+                }
             }
         }
     });
@@ -310,6 +355,24 @@ fn parse_key(key: &str) -> Option<enigo::Key> {
 
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
         let event_tx_clone = event_tx.clone();
+
+        // 0. Send Display Metadata
+        if let Ok(displays) = Display::all() {
+            let metadata = serde_json::json!({
+                "type": "metadata",
+                "displays": displays.iter().enumerate().map(|(i, d)| {
+                    serde_json::json!({
+                        "index": i,
+                        "width": d.width(),
+                        "height": d.height(),
+                        "is_primary": i == 0 // Simplification
+                    })
+                }).collect::<Vec<_>>()
+            });
+            if let Ok(text) = serde_json::from_value::<serde_json::Value>(metadata) {
+                let _ = ws_sender.send(Message::Text(text.to_string())).await;
+            }
+        }
 
         // Relay Control Events from Proxy
         let mut control_task = tokio::spawn(async move {

@@ -45,6 +45,7 @@ impl<'a> ops::Deref for Frame<'a> {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Display(dxgi::Display);
 
 impl Display {
@@ -75,5 +76,13 @@ impl Display {
 
     pub fn logical_height(&self) -> usize {
         self.height()
+    }
+
+    pub fn origin_x(&self) -> i32 {
+        0 // Windows often uses virtual screen space where primary is 0,0
+    }
+
+    pub fn origin_y(&self) -> i32 {
+        0
     }
 }

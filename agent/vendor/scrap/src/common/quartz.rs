@@ -73,6 +73,7 @@ impl<'a> ops::Deref for Frame<'a> {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Display(quartz::Display);
 
 impl Display {
@@ -104,5 +105,13 @@ impl Display {
 
     pub fn logical_height(&self) -> usize {
         self.0.logical_height()
+    }
+
+    pub fn origin_x(&self) -> i32 {
+        self.0.origin_x()
+    }
+
+    pub fn origin_y(&self) -> i32 {
+        self.0.origin_y()
     }
 }
