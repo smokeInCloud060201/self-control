@@ -11,6 +11,7 @@ use crc32fast::Hasher;
 use serde::{Deserialize, Serialize};
 use enigo::{Enigo, MouseButton, MouseControllable};
 use std::sync::{Arc, Mutex};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rand::{thread_rng, Rng};
 use tracing::{info, warn, error, debug, Level};
 use tracing_subscriber::EnvFilter;
@@ -107,9 +108,18 @@ async fn main() -> Result<()> {
     let display_index = Arc::new(Mutex::new(0usize));
     let display_index_cap = display_index.clone();
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<ControlEvent>(100);
-    let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
+    let (data_tx, mut data_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(50);
     let (response_tx, mut response_rx) = tokio::sync::mpsc::channel::<serde_json::Value>(10);
     
+    // Audio Capture Task
+    let audio_tx = data_tx.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = start_audio_capture(audio_tx) {
+            warn!(error = %e, "Audio capture failed to start");
+        }
+    });
+
+    let frame_tx = data_tx.clone();
     // Capture Thread (dedicated OS thread to avoid Tokio runtime conflicts)
     let is_streaming_cap = is_streaming.clone();
     std::thread::spawn(move || {
@@ -202,7 +212,9 @@ async fn main() -> Result<()> {
 
                     if let Some(img) = RgbImage::from_raw(width as u32, height as u32, rgb_data) {
                         if let Ok(_) = encoder.encode_image(&img) {
-                            if let Err(_) = frame_tx.blocking_send(buffer) {
+                            let mut payload = vec![0x01]; // Video Type
+                            payload.extend_from_slice(&buffer);
+                            if let Err(_) = frame_tx.blocking_send(payload) {
                                 break; // Receiver dropped
                             }
                             frame_sent += 1;
@@ -417,6 +429,96 @@ fn set_resolution(display_index: usize, width: usize, height: usize) -> Result<(
     }
 }
 
+fn start_audio_capture(tx: tokio::sync::mpsc::Sender<Vec<u8>>) -> Result<()> {
+    let host = cpal::default_host();
+    
+    // On Windows we want the loopback device for system audio
+    #[cfg(target_os = "windows")]
+    let device = host.default_output_device().ok_or_else(|| anyhow::anyhow!("No default output device found"))?;
+    
+    #[cfg(not(target_os = "windows"))]
+    let device = host.default_input_device().ok_or_else(|| anyhow::anyhow!("No default input device found"))?;
+
+    info!("Using audio device: {}", device.name()?);
+
+    // Try to find a working configuration
+    let supported_configs = device.supported_input_configs()?.collect::<Vec<_>>();
+    if supported_configs.is_empty() {
+        anyhow::bail!("No supported input configs found for device");
+    }
+
+    let mut stream = None;
+    let tx = Arc::new(tx);
+
+    for supported_config in supported_configs {
+        let config = supported_config.with_max_sample_rate();
+        let sample_format = config.sample_format();
+        let channels = config.channels();
+        let stream_config: cpal::StreamConfig = config.into();
+
+        debug!(format = ?sample_format, channels = channels, rate = stream_config.sample_rate.0, "Attempting audio config");
+
+        let tx_clone = tx.clone();
+        let stream_res = match sample_format {
+            cpal::SampleFormat::F32 => device.build_input_stream(
+                &stream_config,
+                move |data: &[f32], _| {
+                    let mut pcm = Vec::with_capacity(data.len() / (channels as usize) * 2 + 1);
+                    pcm.push(0x02); // Audio Type
+                    // Convert to Mono i16
+                    for chunk in data.chunks_exact(channels as usize) {
+                        let avg: f32 = chunk.iter().sum::<f32>() / (channels as f32);
+                        let s = (avg.clamp(-1.0, 1.0) * 32767.0) as i16;
+                        pcm.extend_from_slice(&s.to_le_bytes());
+                    }
+                    let _ = tx_clone.blocking_send(pcm);
+                },
+                |err| error!("Audio stream error: {}", err),
+                None
+            ),
+            cpal::SampleFormat::I16 => device.build_input_stream(
+                &stream_config,
+                move |data: &[i16], _| {
+                    let mut pcm = Vec::with_capacity(data.len() / (channels as usize) * 2 + 1);
+                    pcm.push(0x02); // Audio Type
+                    for chunk in data.chunks_exact(channels as usize) {
+                        let avg: i32 = chunk.iter().map(|&x| x as i32).sum::<i32>() / (channels as i32);
+                        let s = avg as i16;
+                        pcm.extend_from_slice(&s.to_le_bytes());
+                    }
+                    let _ = tx_clone.blocking_send(pcm);
+                },
+                |err| error!("Audio stream error: {}", err),
+                None
+            ),
+            _ => {
+                debug!("Skipping unsupported sample format: {:?}", sample_format);
+                continue;
+            }
+        };
+
+        match stream_res {
+            Ok(s) => {
+                if let Ok(_) = s.play() {
+                    info!(rate = stream_config.sample_rate.0, "Audio capture started successfully");
+                    stream = Some(s);
+                    break;
+                }
+            }
+            Err(e) => {
+                debug!(error = %e, "Failed to build audio stream with this config, trying next...");
+            }
+        }
+    }
+
+    let _stream = stream.ok_or_else(|| anyhow::anyhow!("Failed to start audio capture with any supported config"))?;
+    
+    // Keep the stream alive
+    loop {
+        std::thread::sleep(Duration::from_secs(10));
+    }
+}
+
 fn parse_key(key: &str) -> Option<enigo::Key> {
     use enigo::Key;
     match key.to_lowercase().as_str() {
@@ -497,11 +599,11 @@ fn parse_key(key: &str) -> Option<enigo::Key> {
             }
         });
 
-        // Relay Frames & Responses To Proxy
+        // Relay Data & Responses To Proxy
         loop {
             tokio::select! {
-                Some(buffer) = frame_rx.recv() => {
-                    if let Err(e) = ws_sender.send(Message::Binary(buffer)).await {
+                Some(payload) = data_rx.recv() => {
+                    if let Err(e) = ws_sender.send(Message::Binary(payload)).await {
                         debug!(error = %e, "Relay send failed");
                         break;
                     }

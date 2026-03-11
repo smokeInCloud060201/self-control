@@ -18,6 +18,8 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
     const [displays, setDisplays] = useState<any[]>([]);
     const [currentDisplay, setCurrentDisplay] = useState<number>(0);
+    const audioContextRef = useRef<AudioContext | null>(null);
+    const nextAudioTimeRef = useRef<number>(0);
 
     const toggleFullscreen = () => {
         if (containerRef.current) {
@@ -35,6 +37,13 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
         if (!canvasRef.current) return;
 
         let isCleanup = false;
+
+        if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
+                sampleRate: 44100,
+            });
+            nextAudioTimeRef.current = 0;
+        }
 
         const startConnection = () => {
             if (wsRef.current) return;
@@ -69,25 +78,50 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                 ws.onmessage = async (event) => {
                     if (isCleanup) return;
                     if (event.data instanceof ArrayBuffer) {
-                        try {
-                            const blob = new Blob([event.data], { type: 'image/jpeg' });
-                            const bitmap = await createImageBitmap(blob);
+                        const view = new DataView(event.data);
+                        const type = view.getUint8(0);
+                        const payload = event.data.slice(1);
 
-                            const canvas = canvasRef.current;
-                            if (canvas) {
-                                const ctx = canvas.getContext('2d');
-                                if (ctx) {
-                                    if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-                                        canvas.width = bitmap.width;
-                                        canvas.height = bitmap.height;
-                                        setAspectRatio(bitmap.width / bitmap.height);
-                                        console.log(`[DEBUG] Resolution: ${bitmap.width}x${bitmap.height}, Ratio: ${bitmap.width / bitmap.height}`);
+                        if (type === 0x01) { // Video
+                            try {
+                                const blob = new Blob([payload], { type: 'image/jpeg' });
+                                const bitmap = await createImageBitmap(blob);
+
+                                const canvas = canvasRef.current;
+                                if (canvas) {
+                                    const ctx = canvas.getContext('2d');
+                                    if (ctx) {
+                                        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+                                            canvas.width = bitmap.width;
+                                            canvas.height = bitmap.height;
+                                            setAspectRatio(bitmap.width / bitmap.height);
+                                        }
+                                        ctx.drawImage(bitmap, 0, 0);
                                     }
-                                    ctx.drawImage(bitmap, 0, 0);
                                 }
+                            } catch (e) {
+                                console.error('[DEBUG] Frame decode error:', e);
                             }
-                        } catch (e) {
-                            console.error('[DEBUG] Frame decode error:', e);
+                        } else if (type === 0x02) { // Audio
+                            if (audioContextRef.current && audioContextRef.current.state === 'running') {
+                                const ctx = audioContextRef.current;
+                                const pcm16 = new Int16Array(payload);
+                                // My Agent sends mono for now (pcm.extend_from_slice(&s.to_le_bytes()))
+                                // Actually it depends on the default config. Let's assume Mono for simplicity first or handle channels.
+                                const buffer = ctx.createBuffer(1, pcm16.length, 44100);
+                                const data = buffer.getChannelData(0);
+                                for (let i = 0; i < pcm16.length; i++) {
+                                    data[i] = pcm16[i] / 32768.0;
+                                }
+
+                                const source = ctx.createBufferSource();
+                                source.buffer = buffer;
+                                source.connect(ctx.destination);
+
+                                const startTime = Math.max(ctx.currentTime, nextAudioTimeRef.current);
+                                source.start(startTime);
+                                nextAudioTimeRef.current = startTime + buffer.duration;
+                            }
                         }
                     } else if (typeof event.data === 'string') {
                         try {
@@ -146,7 +180,14 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     }, [proxyUrl, sessionId, password]);
 
     // Handle Input Events
+    const startInteracting = () => {
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+            audioContextRef.current.resume();
+        }
+    };
+
     const handleMouseMove = (e: React.MouseEvent) => {
+        startInteracting();
         if (wsRef.current?.readyState === WebSocket.OPEN && canvasRef.current) {
             const rect = canvasRef.current.getBoundingClientRect();
             // Using nativeEvent.offsetX is more accurate relative to the content area

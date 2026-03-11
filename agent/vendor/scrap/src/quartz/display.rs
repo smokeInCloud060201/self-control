@@ -12,15 +12,16 @@ impl Display {
 
     pub fn online() -> Result<Vec<Display>, CGError> {
         unsafe {
-            let mut arr: [u32; 16] = mem::uninitialized();
+            let mut arr = mem::MaybeUninit::<[u32; 16]>::uninit();
             let mut len: u32 = 0;
 
-            match CGGetOnlineDisplayList(16, arr.as_mut_ptr(), &mut len) {
+            match CGGetOnlineDisplayList(16, arr.as_mut_ptr() as *mut u32, &mut len) {
                 CGError::Success => (),
                 x => return Err(x)
             }
 
-            let mut res = Vec::with_capacity(16);
+            let arr = arr.assume_init();
+            let mut res = Vec::with_capacity(len as usize);
             for i in 0..len as usize {
                 res.push(Display(*arr.get_unchecked(i)));
             }

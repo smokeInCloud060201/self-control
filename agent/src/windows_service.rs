@@ -62,6 +62,7 @@ pub fn restore_desktop(h_desktop: HANDLE) {
 }
 
 #[cfg(not(all(target_os = "windows", feature = "windows_service")))]
+#[allow(dead_code)]
 pub fn switch_to_secure_desktop() -> Option<i32> {
     None
 }

@@ -148,7 +148,7 @@ pub type FrameAvailableHandler = RcBlock<(
 #[link(name="CoreGraphics", kind="framework")]
 #[link(name="CoreFoundation", kind="framework")]
 #[link(name="IOSurface", kind="framework")]
-extern {
+extern "C" {
     // CoreGraphics
 
     pub static kCGDisplayStreamShowCursor: CFStringRef;

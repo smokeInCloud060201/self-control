@@ -19,6 +19,13 @@ documentation = "https://docs.rs/scrap"
 keywords = ["screen", "capture", "record"]
 license = "MIT"
 repository = "https://github.com/quadrupleslap/scrap"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(quartz)', 'cfg(x11)', 'cfg(dxgi)'] }
+missing_abi = "allow"
+deprecated = "allow"
+invalid_value = "allow"
+
 [dependencies.block]
 version = "0.1"
 
