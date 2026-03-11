@@ -1,7 +1,7 @@
 use anyhow::Result;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tokio::sync::mpsc::Sender;
-use tracing::{info, error, debug};
+use tracing::info;
 use lazy_static::lazy_static;
 
 lazy_static! {
