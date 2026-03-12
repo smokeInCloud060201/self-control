@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, ClipboardPaste, Loader2, LogOut, Maximize2, Monitor } from 'lucide-react';
+import { AlertCircle, ClipboardPaste, Keyboard, Loader2, LogOut, Maximize2, Monitor } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { VirtualKeyboard } from './VirtualKeyboard';
 
 interface RdpViewerProps {
     sessionId: string;
@@ -19,7 +20,9 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     const wsRef = useRef<WebSocket | null>(null);
     const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
     const [displays, setDisplays] = useState<any[]>([]);
-    const [currentDisplay, setCurrentDisplay] = useState<number>(0);
+    const [currentDisplay, setCurrentDisplay] = useState(0);
+    const [showVirtualKeyboard, setShowVirtualKeyboard] = useState(false);
+    const [isMobile, setIsMobile] = useState(false);
     const audioContextRef = useRef<AudioContext | null>(null);
     const nextAudioTimeRef = useRef<number>(0);
     const longPressTimerRef = useRef<number | null>(null);
@@ -37,6 +40,19 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
             }
         }
     };
+
+    useEffect(() => {
+        // Simple mobile/tablet detection
+        const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera;
+        const mobileRegex = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
+        setIsMobile(mobileRegex.test(userAgent) || window.innerWidth < 1024);
+
+        const handleResize = () => {
+            setIsMobile(window.innerWidth < 1024);
+        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     useEffect(() => {
         if (!canvasRef.current) return;
@@ -440,6 +456,22 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                             <span className="hidden xs:inline">Paste to Remote</span>
                         </button>
 
+                        {isMobile && (
+                            <button
+                                onClick={() => setShowVirtualKeyboard(!showVirtualKeyboard)}
+                                className={cn(
+                                    "flex items-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl border transition-all group active:scale-95 text-[9px] sm:text-[10px] font-black uppercase tracking-widest",
+                                    showVirtualKeyboard 
+                                        ? "bg-blue-600 border-blue-400 text-white" 
+                                        : "bg-white/5 border-white/10 text-white hover:bg-white/10"
+                                )}
+                                title="Virtual Keyboard"
+                            >
+                                <Keyboard className="w-3.5 h-3.5 sm:w-4 h-4 group-hover:animate-pulse transition-colors" />
+                                <span className="hidden xs:inline">Keyboard</span>
+                            </button>
+                        )}
+
                         <button
                             onClick={toggleFullscreen}
                             className="flex items-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl sm:rounded-2xl border border-white/10 transition-all group active:scale-95 text-[9px] sm:text-[10px] font-black uppercase tracking-widest"
@@ -518,6 +550,20 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                     onKeyUp={handleKeyUp}
                     onContextMenu={(e) => e.preventDefault()}
                 />
+
+                {showVirtualKeyboard && isMobile && (
+                    <VirtualKeyboard 
+                        onKeyPress={(key, isDown) => {
+                            if (wsRef.current?.readyState === WebSocket.OPEN) {
+                                wsRef.current.send(JSON.stringify({ 
+                                    type: isDown ? 'key_down' : 'key_up', 
+                                    key 
+                                }));
+                            }
+                        }}
+                        onClose={() => setShowVirtualKeyboard(false)}
+                    />
+                )}
             </div>
         </div>
     );

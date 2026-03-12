@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
         });
 
     info!("========================================");
-    info!("   SELFCONTROL AGENT v3.0");
+    info!("   SELFCONTROL AGENT v1.1");
     info!("   MACHINE ID: {}", machine_id);
     info!("   PASSWORD:   {}", password_str);
     info!("   MODE:       FULL ACCESS (Integrated Service)");
