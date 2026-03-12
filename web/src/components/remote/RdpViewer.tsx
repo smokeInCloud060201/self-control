@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, ClipboardPaste, Keyboard, Loader2, LogOut, Maximize2, Monitor } from 'lucide-react';
+import { AlertCircle, ChevronUp, ClipboardPaste, Keyboard, Loader2, LogOut, Maximize2, Monitor } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { VirtualKeyboard } from './VirtualKeyboard';
 
@@ -255,6 +255,28 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
         if (wsRef.current?.readyState === WebSocket.OPEN && e.touches.length > 0) {
             const touch = e.touches[0];
             const coords = getScaledCoordinates(touch.clientX, touch.clientY);
+            
+            // Handle toolbar visibility on touch
+            if (status === 'connected') {
+                const rect = containerRef.current?.getBoundingClientRect();
+                if (rect) {
+                    const relativeY = touch.clientY - rect.top;
+                    if (relativeY < 100) {
+                        setShowToolbar(true);
+                        if (toolbarTimerRef.current) {
+                            window.clearTimeout(toolbarTimerRef.current);
+                            toolbarTimerRef.current = null;
+                        }
+                    } else if (showToolbar && !toolbarTimerRef.current) {
+                        // Auto-hide toolbar if touching content area while it's open
+                        toolbarTimerRef.current = window.setTimeout(() => {
+                            setShowToolbar(false);
+                            toolbarTimerRef.current = null;
+                        }, 300);
+                    }
+                }
+            }
+
             if (coords) {
                 // Always sync position first
                 wsRef.current.send(JSON.stringify({ type: 'MouseMove', ...coords }));
@@ -409,90 +431,6 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
 
     return (
         <div className="relative w-full h-full group/viewer">
-            {status === 'connected' && (
-                <div className={cn(
-                    "absolute top-6 left-1/2 -translate-x-1/2 z-50 flex flex-col sm:flex-row items-center justify-between gap-4 px-4 sm:px-8 py-4 bg-slate-900/80 backdrop-blur-2xl border border-white/10 rounded-2xl sm:rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] transition-all duration-500 ease-out",
-                    showToolbar ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-12 pointer-events-none"
-                )}>
-                    <div className="flex items-center gap-6">
-                        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 bg-blue-500/10 border border-blue-500/20 rounded-xl sm:rounded-2xl">
-                            <div className="relative">
-                                <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping absolute inset-0" />
-                                <div className="w-2.5 h-2.5 bg-green-500 rounded-full relative" />
-                            </div>
-                            <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em]">Active Session</span>
-                        </div>
-
-                        {displays.length > 0 && (
-                            <div className="flex items-center bg-slate-950/40 p-1 rounded-2xl border border-white/5">
-                                {displays.map((_, i) => (
-                                    <button
-                                        key={i}
-                                        onClick={() => switchDisplay(i)}
-                                        className={cn(
-                                            "px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all gap-2 flex items-center min-w-[80px] sm:min-w-[100px] justify-center",
-                                            currentDisplay === i
-                                                ? "bg-white text-slate-950 shadow-xl scale-105"
-                                                : "text-slate-500 hover:text-white hover:bg-white/5"
-                                        )}
-                                    >
-                                        <Monitor className="w-3.5 h-3.5" />
-                                        Display {i + 1}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                        <span className="hidden md:inline text-slate-600 font-mono text-[10px] uppercase tracking-widest mr-4">ID: {sessionId.slice(0, 8)}</span>
-
-                        <button
-                            onClick={syncClipboard}
-                            className="flex items-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl sm:rounded-2xl border border-white/10 transition-all group active:scale-95 text-[9px] sm:text-[10px] font-black uppercase tracking-widest"
-                            title="Paste Local Clipboard to Remote"
-                        >
-                            <ClipboardPaste className="w-3.5 h-3.5 sm:w-4 h-4 group-hover:text-blue-400 transition-colors" />
-                            <span className="hidden xs:inline">Paste to Remote</span>
-                        </button>
-
-                        {isMobile && (
-                            <button
-                                onClick={() => setShowVirtualKeyboard(!showVirtualKeyboard)}
-                                className={cn(
-                                    "flex items-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl border transition-all group active:scale-95 text-[9px] sm:text-[10px] font-black uppercase tracking-widest",
-                                    showVirtualKeyboard 
-                                        ? "bg-blue-600 border-blue-400 text-white" 
-                                        : "bg-white/5 border-white/10 text-white hover:bg-white/10"
-                                )}
-                                title="Virtual Keyboard"
-                            >
-                                <Keyboard className="w-3.5 h-3.5 sm:w-4 h-4 group-hover:animate-pulse transition-colors" />
-                                <span className="hidden xs:inline">Keyboard</span>
-                            </button>
-                        )}
-
-                        <button
-                            onClick={toggleFullscreen}
-                            className="flex items-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl sm:rounded-2xl border border-white/10 transition-all group active:scale-95 text-[9px] sm:text-[10px] font-black uppercase tracking-widest"
-                            title="Fullscreen"
-                        >
-                            <Maximize2 className="w-3.5 h-3.5 sm:w-4 h-4 group-hover:text-blue-400 transition-colors" />
-                            <span className="hidden xs:inline">Fullscreen</span>
-                        </button>
-
-                        <button
-                            onClick={() => onDisconnect?.()}
-                            className="flex items-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl sm:rounded-2xl border border-red-500/20 transition-all group active:scale-95 text-[9px] sm:text-[10px] font-black uppercase tracking-widest"
-                            title="Terminate Session"
-                        >
-                            <LogOut className="w-3.5 h-3.5 sm:w-4 h-4 group-hover:text-red-400 transition-colors" />
-                            <span className="hidden md:inline">Terminate</span>
-                        </button>
-                    </div>
-                </div>
-            )}
-
             <div
                 ref={containerRef}
                 style={{ aspectRatio: `${aspectRatio}` }}
@@ -511,6 +449,110 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                 }}
                 onMouseUp={(e) => handleMouseUp(e.button === 0 ? 'left' : 'right')}
             >
+                {/* Mobile Toolbar Toggle */}
+                {isMobile && status === 'connected' && !showToolbar && (
+                    <button
+                        onClick={() => setShowToolbar(true)}
+                        className="absolute top-4 left-4 z-[60] p-3 bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-2xl text-white shadow-2xl active:scale-95 transition-all animate-in fade-in zoom-in duration-300"
+                        title="Show Toolbar"
+                    >
+                        <Monitor className="w-5 h-5 text-blue-400" />
+                    </button>
+                )}
+
+                {status === 'connected' && (
+                    <div className={cn(
+                        "absolute top-4 sm:top-6 landscape:top-2 left-1/2 -translate-x-1/2 z-50 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 px-2 sm:px-8 py-2 sm:py-4 landscape:py-1 bg-slate-900/80 backdrop-blur-2xl border border-white/10 rounded-xl sm:rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] transition-all duration-500 ease-out w-[95%] sm:w-auto overflow-hidden",
+                        showToolbar ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-12 pointer-events-none"
+                    )}>
+                        <div className="flex items-center gap-4 sm:gap-6 w-full sm:w-auto justify-center">
+                            <div className="flex items-center gap-1.5 sm:gap-3 px-2 sm:px-4 py-1 sm:py-2 bg-blue-500/10 border border-blue-500/20 rounded-lg sm:rounded-2xl shrink-0">
+                                <div className="relative">
+                                    <div className="w-1.5 h-1.5 sm:w-2.5 sm:h-2.5 bg-green-500 rounded-full animate-ping absolute inset-0" />
+                                    <div className="w-1.5 h-1.5 sm:w-2.5 sm:h-2.5 bg-green-500 rounded-full relative" />
+                                </div>
+                                <span className="text-[8px] sm:text-[10px] font-black text-blue-400 uppercase tracking-widest sm:tracking-[0.2em] whitespace-nowrap">Active</span>
+                            </div>
+
+                            {displays.length > 0 && (
+                                <div className="flex items-center bg-slate-950/40 p-0.5 sm:p-1 rounded-xl sm:rounded-2xl border border-white/5 overflow-x-auto max-w-[150px] sm:max-w-none no-scrollbar">
+                                    {displays.map((_, i) => (
+                                        <button
+                                            key={i}
+                                            onClick={() => switchDisplay(i)}
+                                            className={cn(
+                                                "px-2 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[8px] sm:text-[10px] font-black uppercase tracking-widest transition-all gap-1.5 sm:gap-2 flex items-center min-w-[60px] sm:min-w-[100px] justify-center whitespace-nowrap",
+                                                currentDisplay === i
+                                                    ? "bg-white text-slate-950 shadow-xl scale-105"
+                                                    : "text-slate-500 hover:text-white hover:bg-white/5"
+                                            )}
+                                        >
+                                            <Monitor className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                            {displays.length > 2 ? (i + 1) : `Display ${i + 1}`}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                            <button
+                                onClick={syncClipboard}
+                                className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-5 py-1.5 sm:py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-lg sm:rounded-2xl border border-white/10 transition-all group active:scale-95 text-[8px] sm:text-[10px] font-black uppercase tracking-widest whitespace-nowrap"
+                                title="Paste Local Clipboard to Remote"
+                            >
+                                <ClipboardPaste className="w-3 h-3 sm:w-4 sm:h-4 group-hover:text-blue-400 transition-colors" />
+                                <span className="hidden sm:inline">Paste</span>
+                            </button>
+
+                            {isMobile && (
+                                <button
+                                    onClick={() => setShowVirtualKeyboard(!showVirtualKeyboard)}
+                                    className={cn(
+                                        "flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-5 py-1.5 sm:py-2.5 rounded-lg sm:rounded-2xl border transition-all group active:scale-95 text-[8px] sm:text-[10px] font-black uppercase tracking-widest whitespace-nowrap",
+                                        showVirtualKeyboard 
+                                            ? "bg-blue-600 border-blue-400 text-white" 
+                                            : "bg-white/5 border-white/10 text-white hover:bg-white/10"
+                                    )}
+                                    title="Virtual Keyboard"
+                                >
+                                    <Keyboard className="w-3 h-3 sm:w-4 sm:h-4 group-hover:animate-pulse transition-colors" />
+                                    <span className="hidden sm:inline">KB</span>
+                                </button>
+                            )}
+
+                            <button
+                                onClick={toggleFullscreen}
+                                className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-5 py-1.5 sm:py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-lg sm:rounded-2xl border border-white/10 transition-all group active:scale-95 text-[8px] sm:text-[10px] font-black uppercase tracking-widest whitespace-nowrap"
+                                title="Fullscreen"
+                            >
+                                <Maximize2 className="w-3 h-3 sm:w-4 sm:h-4 group-hover:text-blue-400 transition-colors" />
+                                <span className="hidden sm:inline">FS</span>
+                            </button>
+
+                            {isMobile && (
+                                <button
+                                    onClick={() => setShowToolbar(false)}
+                                    className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-5 py-1.5 sm:py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-lg sm:rounded-2xl border border-white/10 transition-all group active:scale-95 text-[8px] sm:text-[10px] font-black uppercase tracking-widest whitespace-nowrap"
+                                    title="Hide Toolbar"
+                                >
+                                    <ChevronUp className="w-3 h-3 sm:w-4 sm:h-4 rotate-180 group-hover:text-blue-400 transition-colors" />
+                                    <span className="hidden sm:inline">Hide</span>
+                                </button>
+                            )}
+
+                            <button
+                                onClick={() => onDisconnect?.()}
+                                className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-5 py-1.5 sm:py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg sm:rounded-2xl border border-red-500/20 transition-all group active:scale-95 text-[8px] sm:text-[10px] font-black uppercase tracking-widest whitespace-nowrap"
+                                title="Terminate Session"
+                            >
+                                <LogOut className="w-3 h-3 sm:w-4 sm:h-4 group-hover:text-red-400 transition-colors" />
+                                <span className="hidden sm:inline">Exit</span>
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {status === 'connecting' && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-2xl z-20">
                         <div className="relative flex items-center justify-center mb-8">
