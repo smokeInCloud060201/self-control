@@ -35,7 +35,7 @@ fn main() -> Result<()> {
     });
         
     // Load Persistent Config
-    let mut config = config::load_config();
+    let config = config::load_config();
     
     // Determine Password (CLI > Config > Random)
     let initial_password = args.password.clone()
