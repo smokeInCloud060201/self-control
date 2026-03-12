@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use crate::error::Result;
 use clap::Parser;
 use rand::{thread_rng, Rng};

@@ -1,6 +1,6 @@
 # Release Notes - v1.1.0
 
-This release marks a significant milestone for RustRemote, introducing full Windows support, improved performance, and enhanced security features for production environments.
+This release marks a significant milestone for SelfControl, introducing full Windows support, improved performance, and enhanced security features for production environments.
 
 ## 🚀 New Features
 
@@ -16,13 +16,20 @@ This release marks a significant milestone for RustRemote, introducing full Wind
 ### 🛠 Improvements & Fixes
 - **Refined Display Logic**: Standardized resolution switching and multi-monitor handling.
 - **Enhanced Logging**: Proxy connection errors now include the target host/port for easier troubleshooting.
+- **Improved Windows UX**: The application now launches without a flickering terminal console window in production.
+- **macOS Agent Mode**: The macOS `.app` bundle now runs as a background agent (no terminal, no Dock icon) for a seamless experience.
 - **Memory & Safety**: Resolved `Send` trait violations in the networking layer, improving stability under high load.
 - **Audio Improvements**: Updated macOS capture to use `ScreenCaptureKit` natives.
 
+## 📥 Installation Note
+> [!IMPORTANT]
+> **macOS Users**: After downloading, you MUST move **`SelfControl.app`** to your **`/Applications`** folder before running it. This ensures that macOS Sequoia remembers your screen recording permissions across sessions.
+
 ## 📦 Artifacts
-- `agent-macos-bin`: Standalone macOS Agent binary.
-- `RustRemote.app`: Bundled macOS Application.
+- `SelfControl-macos.zip`: Compressed macOS Application (Recommended).
+- `SelfControl.app`: Bundled macOS Application.
 - `agent-windows.exe`: Native Windows Agent executable.
+- `agent-macos-bin`: Standalone macOS Agent binary.
 
 ---
 *Built with ❤️ using Rust and React.*

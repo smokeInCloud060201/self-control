@@ -5,16 +5,24 @@
     <key>CFBundleExecutable</key>
     <string>agent</string>
     <key>CFBundleIdentifier</key>
-    <string>com.rustremote.agent</string>
+    <string>com.selfcontrol.agent</string>
     <key>CFBundleName</key>
-    <string>RustRemote</string>
+    <string>SelfControl</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>1.1.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>1.1</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>SelfControl requires audio access to stream system audio to the controller.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>SelfControl requires screen recording access to stream your desktop to the controller.</string>
     <key>LSMinimumSystemVersion</key>
-    <string>10.12</string>
+    <string>10.15</string>
     <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSUIElement</key>
     <true/>
 </dict>
 </plist>

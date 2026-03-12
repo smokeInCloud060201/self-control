@@ -12,12 +12,21 @@ echo "--- Building for macOS (.app bundle) ---"
 cd "${REPO_ROOT}/agent"
 cargo build --release
 
-APP_NAME="RustRemote"
+APP_NAME="SelfControl"
 APP_BUNDLE="${RELEASE_DIR}/${APP_NAME}.app"
 
 mkdir -p "${APP_BUNDLE}/Contents/MacOS"
+# Package, Sign and Zip
 cp target/release/agent "${APP_BUNDLE}/Contents/MacOS/"
 cp build/Info.plist "${APP_BUNDLE}/Contents/"
+
+echo "--- Signing and verifying macOS app bundle ---"
+codesign --force --deep --sign - --entitlements build/agent.entitlements "${APP_BUNDLE}"
+
+echo "--- Zipping macOS app bundle for GitHub releases ---"
+cd "${RELEASE_DIR}"
+zip -qr "${APP_NAME}-macos.zip" "${APP_NAME}.app"
+cd - > /dev/null
 
 # Also keep a standalone binary for convenience
 cp target/release/agent "${RELEASE_DIR}/agent-macos-bin"

@@ -1,6 +1,6 @@
-# RustRemote: Secure High-Performance Remote Desktop (v1.1)
+# SelfControl: Secure High-Performance Remote Desktop (v1.1)
 
-RustRemote is a professional, high-performance remote access application built with **Rust** and **React**. It features ultra-low latency streaming, cross-platform support (macOS & Windows), and a secure pairing mechanism using hardware-based Machine IDs.
+SelfControl is a professional, high-performance remote access application built with **Rust** and **React**. It features ultra-low latency streaming, cross-platform support (macOS & Windows), and a secure pairing mechanism using hardware-based Machine IDs.
 
 ## 🌟 Key Features (v1.1)
 - **🚀 Native Performance**: 100% Rust-based agent for maximum efficiency and security.
@@ -53,16 +53,24 @@ A modern dashboard for full remote control.
 
 ---
 
+## ⬇️ Installation
+
+### macOS
+1. Download **`SelfControl-macos.zip`** from the latest release.
+2. Extract the archive to get **`SelfControl.app`**.
+3. **CRITICAL**: Move `SelfControl.app` to your **`/Applications`** folder. 
+   > [!IMPORTANT]
+   > Opening the app from `Downloads` or `Desktop` on macOS (especially Sequoia) will trigger recurring permission prompts due to App Translocation. Moving it to `/Applications` makes permissions persistent.
+4. Open the app and grant **Screen Recording** access when prompted.
+
+### Windows
+1. Download **`agent-windows.exe`** from the latest release.
+2. Run the executable. It will launch in background mode (no terminal console).
+3. If you want to run it as a system service (to control login/UAC screens), refer to the service setup guide.
+
+---
+
 ## 🏃 Getting Started
-
-### 1. Building Releases
-We use a unified build script to generate production-ready binaries for both platforms.
-
-```bash
-# Builds and packages macOS (.app) and Windows (.exe)
-./scripts/build-releases.sh
-```
-Binaries will be available in the `releases/` directory.
 
 ### 2. Manual Development
 **Start the Proxy:**
