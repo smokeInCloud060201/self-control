@@ -34,7 +34,6 @@ async fn main() -> Result<()> {
         
     let mut rng = thread_rng();
     let password_str = args.password.clone()
-        .or_else(|| sys::ui::get_password_input())
         .unwrap_or_else(|| {
             rng.gen_range(100000..999999).to_string()
         });

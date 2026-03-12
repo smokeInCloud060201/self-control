@@ -5,12 +5,12 @@ use clap::Parser;
 pub struct Args {
     #[arg(short, long, default_value = "localhost", env = "PROXY_SERVER")]
     pub server: String,
-    #[arg(short, long, default_value_t = 8080, env = "PROXY_PORT")]
+    #[arg(long, default_value_t = 8080, env = "PROXY_PORT")]
     pub port: u16,
     #[arg(long)]
     pub service: bool,
-    #[arg(long, env = "MACHINE_ID")]
+    #[arg(short, long, env = "MACHINE_ID")]
     pub machine_id: Option<String>,
-    #[arg(long, env = "PASSWORD")]
+    #[arg(short, long, env = "PASSWORD")]
     pub password: Option<String>,
 }

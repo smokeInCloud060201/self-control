@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { CornerDownLeft, Delete as Backspace, ChevronUp, Command, Option, Cpu as Control } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
