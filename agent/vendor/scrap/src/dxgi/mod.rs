@@ -317,7 +317,7 @@ impl Displays {
         // If it's null, we have an error.
         // So we act like the adapter is done.
 
-        if inner.is_null() {
+        if (inner as *mut libc::c_void).is_null() {
             unsafe {
                 (*self.adapter).Release();
                 self.adapter = ptr::null_mut();
@@ -378,6 +378,20 @@ pub struct Display {
     inner: *mut IDXGIOutput1,
     adapter: *mut IDXGIAdapter1,
     desc: DXGI_OUTPUT_DESC
+}
+
+impl Clone for Display {
+    fn clone(&self) -> Self {
+        unsafe {
+            (*self.inner).AddRef();
+            (*self.adapter).AddRef();
+        }
+        Display {
+            inner: self.inner,
+            adapter: self.adapter,
+            desc: self.desc.clone()
+        }
+    }
 }
 
 impl Display {

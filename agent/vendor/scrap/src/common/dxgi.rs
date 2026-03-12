@@ -45,8 +45,13 @@ impl<'a> ops::Deref for Frame<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
 pub struct Display(dxgi::Display);
+
+impl Clone for Display {
+    fn clone(&self) -> Self {
+        Display(self.0.clone())
+    }
+}
 
 impl Display {
     pub fn primary() -> io::Result<Display> {

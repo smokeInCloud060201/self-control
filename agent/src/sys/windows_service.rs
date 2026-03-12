@@ -1,17 +1,11 @@
 #[cfg(target_os = "windows")]
-use windows::Win32::System::Threading::{GetCurrentThreadId, SetThreadDesktop};
+use windows::Win32::System::StationsAndDesktops::{OpenInputDesktop, CloseDesktop, SetThreadDesktop, DESKTOP_ACCESS_FLAGS, DESKTOP_CONTROL_FLAGS, HDESK};
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::WindowsAndMessaging::{OpenInputDesktop, CloseDesktop, DESKTOP_CONTROL_FLAGS};
-#[cfg(target_os = "windows")]
-use windows::Win32::Foundation::{BOOL, HANDLE};
-#[cfg(target_os = "windows")]
-use windows::Win32::System::RemoteDesktop::WTSGetActiveConsoleSessionId;
-#[cfg(target_os = "windows")]
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
 
 #[cfg(target_os = "windows")]
 pub struct AutoDesktop {
-    handle: Option<HANDLE>,
+    handle: Option<HDESK>,
 }
 
 #[cfg(target_os = "windows")]
@@ -33,36 +27,37 @@ impl Drop for AutoDesktop {
 }
 
 #[cfg(target_os = "windows")]
-pub fn switch_to_secure_desktop() -> Option<HANDLE> {
-    #[cfg(feature = "windows_service")]
+pub fn switch_to_secure_desktop() -> Option<HDESK> {
     unsafe {
         // 1. Open the Winlogon desktop
-        let h_desktop = OpenInputDesktop(0, false, 0x01ff); // GENERIC_ALL equivalent for desktops
-        if h_desktop.is_invalid() {
-            debug!("Could not open input desktop (maybe already on it or access denied)");
-            return None;
-        }
+        let h_desktop = match OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_ACCESS_FLAGS(0x01ff)) {
+            Ok(h) => h,
+            Err(e) => {
+                debug!("Could not open input desktop: {:?}", e);
+                return None;
+            }
+        };
 
         // 2. Set it for the current thread
         if SetThreadDesktop(h_desktop).is_ok() {
             info!("Successfully switched thread to secure desktop");
-            return Some(h_desktop);
+            Some(h_desktop)
         } else {
             warn!("Failed to set thread desktop");
             let _ = CloseDesktop(h_desktop);
             None
         }
     }
-    #[cfg(not(feature = "windows_service"))]
-    None
 }
 
 #[cfg(target_os = "windows")]
-pub fn restore_desktop(h_desktop: HANDLE) {
-    #[cfg(feature = "windows_service")]
+pub fn restore_desktop(h_desktop: HDESK) {
     unsafe {
         let _ = CloseDesktop(h_desktop);
     }
-    #[cfg(not(feature = "windows_service"))]
-    let _ = h_desktop;
 }
+
+#[cfg(not(target_os = "windows"))]
+pub struct AutoDesktop;
+#[cfg(not(target_os = "windows"))]
+impl AutoDesktop { pub fn new() -> Self { Self } }

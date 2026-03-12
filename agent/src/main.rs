@@ -103,8 +103,8 @@ fn main() -> Result<()> {
 
                             let res_tx = response_tx_ctrl.clone();
                             tokio::spawn(async move {
-                                if let Ok(displays) = scrap::Display::all() {
-                                    let metadata = serde_json::json!({
+                                let metadata = if let Ok(displays) = scrap::Display::all() {
+                                    Some(serde_json::json!({
                                         "type": "metadata",
                                         "displays": displays.iter().enumerate().map(|(i, d)| {
                                             serde_json::json!({
@@ -114,7 +114,12 @@ fn main() -> Result<()> {
                                                 "is_primary": i == 0
                                             })
                                         }).collect::<Vec<_>>()
-                                    });
+                                    }))
+                                } else {
+                                    None
+                                };
+
+                                if let Some(metadata) = metadata {
                                     let _ = res_tx.send(metadata).await;
                                 }
                             });
@@ -184,7 +189,7 @@ fn main() -> Result<()> {
                                 let res_tx = response_tx_ctrl.clone();
                                 tokio::spawn(async move {
                                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                                    #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                                    #[cfg(target_os = "windows")]
                                     let _desktop_guard = sys::windows_service::AutoDesktop::new();
 
                                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -332,19 +337,17 @@ fn set_resolution(display_index: usize, width: usize, height: usize) -> Result<(
 
     #[cfg(target_os = "windows")]
     {
-        use windows::Win32::Graphics::Gdi::{EnumDisplaySettingsW, ChangeDisplaySettingsExW, DEVMODEW, ENUM_CURRENT_SETTINGS, CDS_UPDATEREGISTRY, DISP_CHANGE_SUCCESSFUL};
-
         unsafe {
-            let mut dev_mode: DEVMODEW = std::mem::zeroed();
-            dev_mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+            let mut dev_mode: ::windows::Win32::Graphics::Gdi::DEVMODEW = std::mem::zeroed();
+            dev_mode.dmSize = std::mem::size_of::<::windows::Win32::Graphics::Gdi::DEVMODEW>() as u16;
 
-            if EnumDisplaySettingsW(None, ENUM_CURRENT_SETTINGS, &mut dev_mode).as_bool() {
+            if ::windows::Win32::Graphics::Gdi::EnumDisplaySettingsW(None, ::windows::Win32::Graphics::Gdi::ENUM_CURRENT_SETTINGS, &mut dev_mode).as_bool() {
                 dev_mode.dmPelsWidth = width as u32;
                 dev_mode.dmPelsHeight = height as u32;
-                dev_mode.dmFields = windows::Win32::Graphics::Gdi::DM_PELSWIDTH | windows::Win32::Graphics::Gdi::DM_PELSHEIGHT;
+                dev_mode.dmFields = ::windows::Win32::Graphics::Gdi::DM_PELSWIDTH | ::windows::Win32::Graphics::Gdi::DM_PELSHEIGHT;
 
-                let result = ChangeDisplaySettingsExW(None, Some(&dev_mode), None, CDS_UPDATEREGISTRY, None);
-                if result == DISP_CHANGE_SUCCESSFUL {
+                let result = ::windows::Win32::Graphics::Gdi::ChangeDisplaySettingsExW(None, Some(&dev_mode), None, ::windows::Win32::Graphics::Gdi::CDS_UPDATEREGISTRY, None);
+                if result == ::windows::Win32::Graphics::Gdi::DISP_CHANGE_SUCCESSFUL {
                     tracing::info!("Resolution changed successfully to {}x{}", width, height);
                     Ok(())
                 } else {
