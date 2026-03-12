@@ -45,7 +45,7 @@ pub async fn start_connection_loop(
         let ws_stream = match connect_async_with_config(&proxy_url, Some(config), true).await {
             Ok((s, _)) => s,
             Err(e) => {
-                error!(error = %e, "Proxy connection failed, retrying in 3s");
+                error!(error = %e, "Proxy connection failed to {}:{}, retrying in 3s", server_clean, port);
                 sleep(Duration::from_secs(3)).await;
                 continue;
             }
