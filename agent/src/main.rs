@@ -24,26 +24,26 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let machine_id = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| {
-            machine_uid::get().unwrap_or_else(|_| "unknown-machine".to_string())
-        });
+    let machine_id = args.machine_id.clone().unwrap_or_else(|| {
+        local_ip_address::local_ip()
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|_| {
+                machine_uid::get().unwrap_or_else(|_| "unknown-machine".to_string())
+            })
+    });
         
     let mut rng = thread_rng();
-    let password_str = if args.service {
-        "admin123".to_string() // Static password for service mode for now
-    } else {
-        rng.gen_range(100000..999999).to_string()
-    };
+    let password_str = args.password.clone()
+        .or_else(|| sys::ui::get_password_input())
+        .unwrap_or_else(|| {
+            rng.gen_range(100000..999999).to_string()
+        });
 
     info!("========================================");
-    info!("   RUST REMOTE AGENT v2.5");
+    info!("   SELFCONTROL AGENT v3.0");
     info!("   MACHINE ID: {}", machine_id);
     info!("   PASSWORD:   {}", password_str);
-    if args.service {
-        info!("   MODE:       SYSTEM SERVICE");
-    }
+    info!("   MODE:       FULL ACCESS (Integrated Service)");
     info!("========================================");
 
     let is_streaming = Arc::new(Mutex::new(false));
@@ -113,7 +113,7 @@ async fn main() -> Result<()> {
                 ControlEvent::MouseMove { x, y } => {
                     let d_idx = display_index_ctrl.clone();
                     tokio::task::spawn_blocking(move || {
-                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        #[cfg(target_os = "windows")]
                         let _desktop_guard = sys::windows_service::AutoDesktop::new();
 
                         let idx = { *d_idx.lock().unwrap() };
@@ -131,7 +131,7 @@ async fn main() -> Result<()> {
                 ControlEvent::MouseDown { button } => {
                     let btn = if button == "right" { enigo::MouseButton::Right } else { enigo::MouseButton::Left };
                     tokio::task::spawn_blocking(move || {
-                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        #[cfg(target_os = "windows")]
                         let _desktop_guard = sys::windows_service::AutoDesktop::new();
                         use enigo::MouseControllable;
                         let mut enigo = enigo::Enigo::new();
@@ -141,7 +141,7 @@ async fn main() -> Result<()> {
                 ControlEvent::MouseUp { button } => {
                     let btn = if button == "right" { enigo::MouseButton::Right } else { enigo::MouseButton::Left };
                     tokio::task::spawn_blocking(move || {
-                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        #[cfg(target_os = "windows")]
                         let _desktop_guard = sys::windows_service::AutoDesktop::new();
                         use enigo::MouseControllable;
                         let mut enigo = enigo::Enigo::new();
@@ -151,7 +151,7 @@ async fn main() -> Result<()> {
                 ControlEvent::KeyDown { key } => {
                     let key_c = key.clone();
                     tokio::task::spawn_blocking(move || {
-                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        #[cfg(target_os = "windows")]
                         let _desktop_guard = sys::windows_service::AutoDesktop::new();
 
                         use enigo::KeyboardControllable;
@@ -182,7 +182,7 @@ async fn main() -> Result<()> {
                 }
                 ControlEvent::KeyUp { key } => {
                     tokio::task::spawn_blocking(move || {
-                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        #[cfg(target_os = "windows")]
                         let _desktop_guard = sys::windows_service::AutoDesktop::new();
 
                         use enigo::KeyboardControllable;
@@ -194,7 +194,7 @@ async fn main() -> Result<()> {
                 }
                 ControlEvent::PasteText { text } => {
                     tokio::task::spawn_blocking(move || {
-                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        #[cfg(target_os = "windows")]
                         let _desktop_guard = sys::windows_service::AutoDesktop::new();
 
                         if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -227,7 +227,7 @@ async fn main() -> Result<()> {
                 }
                 ControlEvent::MouseWheel { delta_x, delta_y } => {
                     tokio::task::spawn_blocking(move || {
-                        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                        #[cfg(target_os = "windows")]
                         let _desktop_guard = sys::windows_service::AutoDesktop::new();
                         use enigo::MouseControllable;
                         let mut enigo = enigo::Enigo::new();

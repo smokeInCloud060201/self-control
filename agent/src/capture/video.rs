@@ -19,7 +19,7 @@ pub fn start_video_capture(
     let mut current_display_idx = 0;
 
     loop {
-        #[cfg(all(target_os = "windows", feature = "windows_service"))]
+        #[cfg(target_os = "windows")]
         let _desktop_guard = crate::sys::windows_service::AutoDesktop::new();
 
         // 0. Check if display index changed

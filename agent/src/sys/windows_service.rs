@@ -1,20 +1,20 @@
-#[cfg(all(target_os = "windows", feature = "windows_service"))]
+#[cfg(target_os = "windows")]
 use windows::Win32::System::Threading::{GetCurrentThreadId, SetThreadDesktop};
-#[cfg(all(target_os = "windows", feature = "windows_service"))]
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{OpenInputDesktop, CloseDesktop, DESKTOP_CONTROL_FLAGS};
-#[cfg(all(target_os = "windows", feature = "windows_service"))]
+#[cfg(target_os = "windows")]
 use windows::Win32::Foundation::{BOOL, HANDLE};
-#[cfg(all(target_os = "windows", feature = "windows_service"))]
+#[cfg(target_os = "windows")]
 use windows::Win32::System::RemoteDesktop::WTSGetActiveConsoleSessionId;
-#[cfg(all(target_os = "windows", feature = "windows_service"))]
+#[cfg(target_os = "windows")]
 use tracing::{info, warn, error, debug};
 
-#[cfg(all(target_os = "windows", feature = "windows_service"))]
+#[cfg(target_os = "windows")]
 pub struct AutoDesktop {
     handle: Option<HANDLE>,
 }
 
-#[cfg(all(target_os = "windows", feature = "windows_service"))]
+#[cfg(target_os = "windows")]
 impl AutoDesktop {
     pub fn new() -> Self {
         Self {
@@ -23,7 +23,7 @@ impl AutoDesktop {
     }
 }
 
-#[cfg(all(target_os = "windows", feature = "windows_service"))]
+#[cfg(target_os = "windows")]
 impl Drop for AutoDesktop {
     fn drop(&mut self) {
         if let Some(h) = self.handle {
@@ -32,8 +32,9 @@ impl Drop for AutoDesktop {
     }
 }
 
-#[cfg(all(target_os = "windows", feature = "windows_service"))]
+#[cfg(target_os = "windows")]
 pub fn switch_to_secure_desktop() -> Option<HANDLE> {
+    #[cfg(feature = "windows_service")]
     unsafe {
         // 1. Open the Winlogon desktop
         let h_desktop = OpenInputDesktop(0, false, 0x01ff); // GENERIC_ALL equivalent for desktops
@@ -52,17 +53,16 @@ pub fn switch_to_secure_desktop() -> Option<HANDLE> {
             None
         }
     }
+    #[cfg(not(feature = "windows_service"))]
+    None
 }
 
-#[cfg(all(target_os = "windows", feature = "windows_service"))]
+#[cfg(target_os = "windows")]
 pub fn restore_desktop(h_desktop: HANDLE) {
+    #[cfg(feature = "windows_service")]
     unsafe {
         let _ = CloseDesktop(h_desktop);
     }
-}
-
-#[cfg(not(all(target_os = "windows", feature = "windows_service")))]
-#[allow(dead_code)]
-pub fn switch_to_secure_desktop() -> Option<i32> {
-    None
+    #[cfg(not(feature = "windows_service"))]
+    let _ = h_desktop;
 }

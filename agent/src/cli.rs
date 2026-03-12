@@ -9,4 +9,8 @@ pub struct Args {
     pub port: u16,
     #[arg(long)]
     pub service: bool,
+    #[arg(long, env = "MACHINE_ID")]
+    pub machine_id: Option<String>,
+    #[arg(long, env = "PASSWORD")]
+    pub password: Option<String>,
 }
