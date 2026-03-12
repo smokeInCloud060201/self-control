@@ -7,16 +7,18 @@ use tracing_subscriber::EnvFilter;
 
 mod capture;
 mod cli;
+mod config;
 mod error;
+mod gui;
 mod models;
 mod network;
 mod sys;
 
 use cli::Args;
+
 use models::ControlEvent;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive(Level::INFO.into()))
@@ -32,228 +34,270 @@ async fn main() -> Result<()> {
             })
     });
         
-    let mut rng = thread_rng();
-    let password_str = args.password.clone()
+    // Load Persistent Config
+    let mut config = config::load_config();
+    
+    // Determine Password (CLI > Config > Random)
+    let initial_password = args.password.clone()
+        .or_else(|| config.default_passkey.clone())
         .unwrap_or_else(|| {
-            rng.gen_range(100000..999999).to_string()
+            let pwd = thread_rng().gen_range(100000..999999).to_string();
+            pwd
         });
+    
+    let password_shared = Arc::new(Mutex::new(initial_password));
 
     info!("========================================");
     info!("   SELFCONTROL AGENT v1.1");
     info!("   MACHINE ID: {}", machine_id);
-    info!("   PASSWORD:   {}", password_str);
     info!("   MODE:       FULL ACCESS (Integrated Service)");
     info!("========================================");
 
     let is_streaming = Arc::new(Mutex::new(false));
     let display_index = Arc::new(Mutex::new(0usize));
+    let status = Arc::new(Mutex::new("Disconnected".to_string()));
     
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<ControlEvent>(100);
-    let (data_tx, data_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(50);
-    let (response_tx, response_rx) = tokio::sync::mpsc::channel::<serde_json::Value>(10);
+    // Remote Control Service Logic
+    let machine_id_service = machine_id.clone();
+    let password_shared_service = password_shared.clone();
+    let is_streaming_service = is_streaming.clone();
+    let display_index_service = display_index.clone();
+    let server_service = args.server.clone();
+    let port_service = args.port;
+    let status_service = status.clone();
 
-    // Audio Capture Task
-    let audio_tx = data_tx.clone();
     std::thread::spawn(move || {
-        if let Err(e) = capture::audio::start_audio_capture(audio_tx) {
-            tracing::warn!(error = %e, "Audio capture failed to start");
-        }
-    });
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<ControlEvent>(100);
+            let (data_tx, data_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(50);
+            let (response_tx, response_rx) = tokio::sync::mpsc::channel::<serde_json::Value>(10);
 
-    // Video Capture Task
-    let is_streaming_cap = is_streaming.clone();
-    let display_index_cap = display_index.clone();
-    let frame_tx = data_tx.clone();
-    std::thread::spawn(move || {
-        capture::video::start_video_capture(is_streaming_cap, display_index_cap, frame_tx);
-    });
+            // Audio Capture Task
+            let audio_tx = data_tx.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = capture::audio::start_audio_capture(audio_tx) {
+                    tracing::warn!(error = %e, "Audio capture failed to start");
+                }
+            });
 
-    // Input Control Handler Task
-    let is_streaming_ctrl = is_streaming.clone();
-    let display_index_ctrl = display_index.clone();
-    let response_tx_ctrl = response_tx.clone();
-    tokio::spawn(async move {
-        while let Some(event) = event_rx.recv().await {
-            match event {
-                ControlEvent::StartCapture => {
-                    info!("[SIGNAL] Starting Capture loop");
-                    let mut s = is_streaming_ctrl.lock().unwrap();
-                    *s = true;
+            // Video Capture Task
+            let is_streaming_cap = is_streaming_service.clone();
+            let display_index_cap = display_index_service.clone();
+            let frame_tx = data_tx.clone();
+            std::thread::spawn(move || {
+                capture::video::start_video_capture(is_streaming_cap, display_index_cap, frame_tx);
+            });
 
-                    // Send display metadata whenever a client joins
-                    let res_tx = response_tx_ctrl.clone();
-                    tokio::spawn(async move {
-                        if let Ok(displays) = scrap::Display::all() {
-                            let metadata = serde_json::json!({
-                                "type": "metadata",
-                                "displays": displays.iter().enumerate().map(|(i, d)| {
-                                    serde_json::json!({
-                                        "index": i,
-                                        "width": d.width(),
-                                        "height": d.height(),
-                                        "is_primary": i == 0
-                                    })
-                                }).collect::<Vec<_>>()
+            // Input Control Handler Task
+            let is_streaming_ctrl = is_streaming_service.clone();
+            let display_index_ctrl = display_index_service.clone();
+            let response_tx_ctrl = response_tx.clone();
+            tokio::spawn(async move {
+                while let Some(event) = event_rx.recv().await {
+                    match event {
+                        ControlEvent::StartCapture => {
+                            info!("[SIGNAL] Starting Capture loop");
+                            let mut s = is_streaming_ctrl.lock().unwrap();
+                            *s = true;
+
+                            let res_tx = response_tx_ctrl.clone();
+                            tokio::spawn(async move {
+                                if let Ok(displays) = scrap::Display::all() {
+                                    let metadata = serde_json::json!({
+                                        "type": "metadata",
+                                        "displays": displays.iter().enumerate().map(|(i, d)| {
+                                            serde_json::json!({
+                                                "index": i,
+                                                "width": d.width(),
+                                                "height": d.height(),
+                                                "is_primary": i == 0
+                                            })
+                                        }).collect::<Vec<_>>()
+                                    });
+                                    let _ = res_tx.send(metadata).await;
+                                }
                             });
-                            let _ = res_tx.send(metadata).await;
                         }
-                    });
-                }
-                ControlEvent::StopCapture => {
-                    info!("[SIGNAL] Stopping Capture loop (Idle mode)");
-                    let mut s = is_streaming_ctrl.lock().unwrap();
-                    *s = false;
-                }
-                ControlEvent::SwitchDisplay { index } => {
-                    info!(index = index, "[SIGNAL] Switching to display");
-                    let mut idx = display_index_ctrl.lock().unwrap();
-                    *idx = index;
-                }
-                ControlEvent::MouseMove { x, y } => {
-                    let d_idx = display_index_ctrl.clone();
-                    tokio::task::spawn_blocking(move || {
-                        #[cfg(target_os = "windows")]
-                        let _desktop_guard = sys::windows_service::AutoDesktop::new();
+                        ControlEvent::StopCapture => {
+                            info!("[SIGNAL] Stopping Capture loop (Idle mode)");
+                            let mut s = is_streaming_ctrl.lock().unwrap();
+                            *s = false;
+                        }
+                        ControlEvent::SwitchDisplay { index } => {
+                            info!(index = index, "[SIGNAL] Switching to display");
+                            let mut idx = display_index_ctrl.lock().unwrap();
+                            *idx = index;
+                        }
+                        ControlEvent::MouseMove { x, y } => {
+                            let d_idx = display_index_ctrl.clone();
+                            tokio::task::spawn_blocking(move || {
+                                #[cfg(target_os = "windows")]
+                                let _desktop_guard = sys::windows_service::AutoDesktop::new();
 
-                        let idx = { *d_idx.lock().unwrap() };
-                        if let Ok(displays) = scrap::Display::all() {
-                            if let Some(display) = displays.get(idx).or_else(|| displays.first()) {
+                                let idx = { *d_idx.lock().unwrap() };
+                                if let Ok(displays) = scrap::Display::all() {
+                                    if let Some(display) = displays.get(idx).or_else(|| displays.first()) {
+                                        use enigo::MouseControllable;
+                                        let mut enigo = enigo::Enigo::new();
+                                        let lx = x * display.logical_width() as f32 + display.origin_x() as f32;
+                                        let ly = y * display.logical_height() as f32 + display.origin_y() as f32;
+                                        enigo.mouse_move_to(lx as i32, ly as i32);
+                                    }
+                                }
+                            }).await.ok();
+                        }
+                        ControlEvent::MouseDown { button } => {
+                            let btn = if button == "right" { enigo::MouseButton::Right } else { enigo::MouseButton::Left };
+                            tokio::task::spawn_blocking(move || {
+                                #[cfg(target_os = "windows")]
+                                let _desktop_guard = sys::windows_service::AutoDesktop::new();
                                 use enigo::MouseControllable;
                                 let mut enigo = enigo::Enigo::new();
-                                let lx = x * display.logical_width() as f32 + display.origin_x() as f32;
-                                let ly = y * display.logical_height() as f32 + display.origin_y() as f32;
-                                enigo.mouse_move_to(lx as i32, ly as i32);
-                            }
+                                enigo.mouse_down(btn);
+                            }).await.ok();
                         }
-                    }).await.ok();
-                }
-                ControlEvent::MouseDown { button } => {
-                    let btn = if button == "right" { enigo::MouseButton::Right } else { enigo::MouseButton::Left };
-                    tokio::task::spawn_blocking(move || {
-                        #[cfg(target_os = "windows")]
-                        let _desktop_guard = sys::windows_service::AutoDesktop::new();
-                        use enigo::MouseControllable;
-                        let mut enigo = enigo::Enigo::new();
-                        enigo.mouse_down(btn);
-                    }).await.ok();
-                }
-                ControlEvent::MouseUp { button } => {
-                    let btn = if button == "right" { enigo::MouseButton::Right } else { enigo::MouseButton::Left };
-                    tokio::task::spawn_blocking(move || {
-                        #[cfg(target_os = "windows")]
-                        let _desktop_guard = sys::windows_service::AutoDesktop::new();
-                        use enigo::MouseControllable;
-                        let mut enigo = enigo::Enigo::new();
-                        enigo.mouse_up(btn);
-                    }).await.ok();
-                }
-                ControlEvent::KeyDown { key } => {
-                    let key_c = key.clone();
-                    tokio::task::spawn_blocking(move || {
-                        #[cfg(target_os = "windows")]
-                        let _desktop_guard = sys::windows_service::AutoDesktop::new();
-
-                        use enigo::KeyboardControllable;
-                        let mut enigo = enigo::Enigo::new();
-                        if let Some(k) = parse_key(&key) {
-                            enigo.key_down(k);
+                        ControlEvent::MouseUp { button } => {
+                            let btn = if button == "right" { enigo::MouseButton::Right } else { enigo::MouseButton::Left };
+                            tokio::task::spawn_blocking(move || {
+                                #[cfg(target_os = "windows")]
+                                let _desktop_guard = sys::windows_service::AutoDesktop::new();
+                                use enigo::MouseControllable;
+                                let mut enigo = enigo::Enigo::new();
+                                enigo.mouse_up(btn);
+                            }).await.ok();
                         }
-                    }).await.ok();
+                        ControlEvent::KeyDown { key } => {
+                            let key_c = key.clone();
+                            tokio::task::spawn_blocking(move || {
+                                #[cfg(target_os = "windows")]
+                                let _desktop_guard = sys::windows_service::AutoDesktop::new();
 
-                    if key_c.to_lowercase() == "c" {
-                        let res_tx = response_tx_ctrl.clone();
-                        tokio::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                            #[cfg(all(target_os = "windows", feature = "windows_service"))]
-                            let _desktop_guard = sys::windows_service::AutoDesktop::new();
-
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                if let Ok(text) = clipboard.get_text() {
-                                    let msg = serde_json::json!({
-                                        "type": "clipboard_sync",
-                                        "text": text
-                                    });
-                                    let _ = res_tx.send(msg).await;
+                                use enigo::KeyboardControllable;
+                                let mut enigo = enigo::Enigo::new();
+                                if let Some(k) = parse_key(&key) {
+                                    enigo.key_down(k);
                                 }
+                            }).await.ok();
+
+                            if key_c.to_lowercase() == "c" {
+                                let res_tx = response_tx_ctrl.clone();
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                                    #[cfg(all(target_os = "windows", feature = "windows_service"))]
+                                    let _desktop_guard = sys::windows_service::AutoDesktop::new();
+
+                                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                        if let Ok(text) = clipboard.get_text() {
+                                            let msg = serde_json::json!({
+                                                "type": "clipboard_sync",
+                                                "text": text
+                                            });
+                                            let _ = res_tx.send(msg).await;
+                                        }
+                                    }
+                                });
                             }
-                        });
+                        }
+                        ControlEvent::KeyUp { key } => {
+                            tokio::task::spawn_blocking(move || {
+                                #[cfg(target_os = "windows")]
+                                let _desktop_guard = sys::windows_service::AutoDesktop::new();
+
+                                use enigo::KeyboardControllable;
+                                let mut enigo = enigo::Enigo::new();
+                                if let Some(k) = parse_key(&key) {
+                                    enigo.key_up(k);
+                                }
+                            }).await.ok();
+                        }
+                        ControlEvent::PasteText { text } => {
+                            tokio::task::spawn_blocking(move || {
+                                #[cfg(target_os = "windows")]
+                                let _desktop_guard = sys::windows_service::AutoDesktop::new();
+
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    let _ = clipboard.set_text(text);
+                                }
+
+                                // Trigger Paste via keyboard
+                                use enigo::{Key, KeyboardControllable};
+                                let mut enigo = enigo::Enigo::new();
+                                
+                                #[cfg(target_os = "macos")]
+                                let modifier = Key::Meta;
+                                #[cfg(not(target_os = "macos"))]
+                                let modifier = Key::Control;
+
+                                enigo.key_down(modifier);
+                                enigo.key_click(Key::Layout('v'));
+                                enigo.key_up(modifier);
+                            }).await.ok();
+                        }
+                        ControlEvent::ResolutionUpdate { width, height } => {
+                            let d_idx = display_index_ctrl.clone();
+                            tokio::task::spawn_blocking(move || {
+                                let idx = { *d_idx.lock().unwrap() };
+                                info!(width = width, height = height, index = idx, "[SIGNAL] Updating Resolution");
+                                if let Err(e) = set_resolution(idx, width, height) {
+                                    tracing::error!(error = %e, "Failed to update resolution");
+                                }
+                            }).await.ok();
+                        }
+                        ControlEvent::MouseWheel { delta_x, delta_y } => {
+                            tokio::task::spawn_blocking(move || {
+                                #[cfg(target_os = "windows")]
+                                let _desktop_guard = sys::windows_service::AutoDesktop::new();
+                                use enigo::MouseControllable;
+                                let mut enigo = enigo::Enigo::new();
+                                if delta_x != 0 {
+                                    enigo.mouse_scroll_x(delta_x);
+                                }
+                                if delta_y != 0 {
+                                    enigo.mouse_scroll_y(delta_y);
+                                }
+                            }).await.ok();
+                        }
                     }
                 }
-                ControlEvent::KeyUp { key } => {
-                    tokio::task::spawn_blocking(move || {
-                        #[cfg(target_os = "windows")]
-                        let _desktop_guard = sys::windows_service::AutoDesktop::new();
+            });
 
-                        use enigo::KeyboardControllable;
-                        let mut enigo = enigo::Enigo::new();
-                        if let Some(k) = parse_key(&key) {
-                            enigo.key_up(k);
-                        }
-                    }).await.ok();
-                }
-                ControlEvent::PasteText { text } => {
-                    tokio::task::spawn_blocking(move || {
-                        #[cfg(target_os = "windows")]
-                        let _desktop_guard = sys::windows_service::AutoDesktop::new();
-
-                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                            let _ = clipboard.set_text(text);
-                        }
-
-                        // Trigger Paste via keyboard
-                        use enigo::{Key, KeyboardControllable};
-                        let mut enigo = enigo::Enigo::new();
-                        
-                        #[cfg(target_os = "macos")]
-                        let modifier = Key::Meta;
-                        #[cfg(not(target_os = "macos"))]
-                        let modifier = Key::Control;
-
-                        enigo.key_down(modifier);
-                        enigo.key_click(Key::Layout('v'));
-                        enigo.key_up(modifier);
-                    }).await.ok();
-                }
-                ControlEvent::ResolutionUpdate { width, height } => {
-                    let d_idx = display_index_ctrl.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let idx = { *d_idx.lock().unwrap() };
-                        info!(width = width, height = height, index = idx, "[SIGNAL] Updating Resolution");
-                        if let Err(e) = set_resolution(idx, width, height) {
-                            tracing::error!(error = %e, "Failed to update resolution");
-                        }
-                    }).await.ok();
-                }
-                ControlEvent::MouseWheel { delta_x, delta_y } => {
-                    tokio::task::spawn_blocking(move || {
-                        #[cfg(target_os = "windows")]
-                        let _desktop_guard = sys::windows_service::AutoDesktop::new();
-                        use enigo::MouseControllable;
-                        let mut enigo = enigo::Enigo::new();
-                        if delta_x != 0 {
-                            enigo.mouse_scroll_x(delta_x);
-                        }
-                        if delta_y != 0 {
-                            enigo.mouse_scroll_y(delta_y);
-                        }
-                    }).await.ok();
-                }
-            }
-        }
+            // Start WebSocket Network Loop
+            let _ = network::ws::start_connection_loop(
+                server_service,
+                port_service,
+                machine_id_service,
+                password_shared_service,
+                is_streaming_service,
+                display_index_service,
+                event_tx,
+                data_rx,
+                response_rx,
+                status_service,
+            ).await;
+        });
     });
 
-    // Start WebSocket Network Loop
-    network::ws::start_connection_loop(
-        args.server,
-        args.port,
-        machine_id,
-        password_str,
-        is_streaming,
-        display_index,
-        event_tx,
-        data_rx,
-        response_rx,
-    ).await?;
+    // Start GUI Dashboard on Main Thread
+    let options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_inner_size([400.0, 350.0])
+            .with_resizable(false),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "SelfControl Agent",
+        options,
+        Box::new(|_cc| {
+            Box::new(gui::dashboard::DashboardApp::new(
+                machine_id,
+                password_shared,
+                is_streaming,
+                status,
+            ))
+        }),
+    ).map_err(|e| anyhow::anyhow!("Eframe error: {}", e))?;
 
     Ok(())
 }

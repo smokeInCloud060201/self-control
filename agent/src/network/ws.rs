@@ -13,12 +13,13 @@ pub async fn start_connection_loop(
     server: String,
     port: u16,
     machine_id: String,
-    password_str: String,
+    password: Arc<Mutex<String>>,
     is_streaming: Arc<Mutex<bool>>,
     _display_index: Arc<Mutex<usize>>,
     event_tx: tokio::sync::mpsc::Sender<ControlEvent>,
     mut data_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
     mut response_rx: tokio::sync::mpsc::Receiver<serde_json::Value>,
+    status: Arc<Mutex<String>>,
 ) -> Result<()> {
     let mut scheme = "ws";
     let mut server_clean = server.clone();
@@ -30,7 +31,6 @@ pub async fn start_connection_loop(
     }
     server_clean = server_clean.trim_end_matches('/').to_string();
 
-    let proxy_url = format!("{}://{}:{}/agent/{}/{}", scheme, server_clean, port, machine_id, password_str);
     let config = WebSocketConfig {
         max_message_size: Some(128 * 1024 * 1024),
         max_frame_size: Some(32 * 1024 * 1024),
@@ -38,6 +38,9 @@ pub async fn start_connection_loop(
     };
     
     loop {
+        let current_pwd = { password.lock().unwrap().clone() };
+        let proxy_url = format!("{}://{}:{}/agent/{}/{}", scheme, server_clean, port, machine_id, current_pwd);
+        
         debug!(url = %proxy_url, "Connecting to proxy");
         let ws_stream = match connect_async_with_config(&proxy_url, Some(config), true).await {
             Ok((s, _)) => s,
@@ -47,6 +50,7 @@ pub async fn start_connection_loop(
                 continue;
             }
         };
+        { *status.lock().unwrap() = "Connected".to_string(); }
         info!("Connected to proxy {}:{}", server_clean, port);
 
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
@@ -114,6 +118,7 @@ pub async fn start_connection_loop(
         
         control_task.abort();
         { *is_streaming.lock().unwrap() = false; }
+        { *status.lock().unwrap() = "Disconnected".to_string(); }
         warn!("Connection lost, re-establishing in 2s...");
         sleep(Duration::from_secs(2)).await;
     }
