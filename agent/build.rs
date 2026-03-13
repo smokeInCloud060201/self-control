@@ -17,6 +17,7 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=AppKit");
         println!("cargo:rustc-link-lib=framework=ScreenCaptureKit");
         println!("cargo:rustc-link-lib=framework=CoreMedia");
+        println!("cargo:rustc-link-lib=framework=IOKit");
 
         cc::Build::new()
             .file("src/sys/SCKAudioCapture.m")

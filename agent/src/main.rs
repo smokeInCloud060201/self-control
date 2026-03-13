@@ -48,6 +48,9 @@ fn main() -> Result<()> {
         });
     
     let password_shared = Arc::new(Mutex::new(initial_password));
+    
+    #[cfg(target_os = "macos")]
+    sys::macos_power::init_power_management();
 
     info!("========================================");
     info!("   SELFCONTROL AGENT v1.1");
