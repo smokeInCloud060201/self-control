@@ -1,17 +1,17 @@
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 use core_foundation::dictionary::CFDictionary;
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 use core_foundation::string::CFString;
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 use core_foundation::base::{TCFType, CFTypeRef};
 
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGSessionCopyCurrentDictionary() -> CFTypeRef;
 }
 
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 pub fn is_login_window() -> bool {
     unsafe {
         let dict_ptr = CGSessionCopyCurrentDictionary();
@@ -38,7 +38,7 @@ pub fn is_login_window() -> bool {
     }
 }
 
-#[cfg(not(all(target_os = "macos", feature = "macos_service")))]
+#[cfg(not(target_os = "macos"))]
 pub fn is_login_window() -> bool {
     false
 }

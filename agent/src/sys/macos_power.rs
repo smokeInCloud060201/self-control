@@ -1,11 +1,11 @@
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 use core_foundation::base::TCFType;
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 use core_foundation::string::CFString;
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 use std::ptr;
 
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 #[link(name = "IOKit", kind = "framework")]
 extern "C" {
     fn IOPMAssertionCreateWithDescription(
@@ -20,14 +20,20 @@ extern "C" {
     ) -> i32; // IOReturn
 
     fn IOPMAssertionRelease(assertion_id: u32) -> i32;
+
+    fn IOPMAssertionDeclareUserActivity(
+        assertion_name: core_foundation::base::CFTypeRef,
+        user_activity_type: u32,
+        assertion_id: *mut u32,
+    ) -> i32;
 }
 
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 pub struct PowerAssertion {
     id: u32,
 }
 
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 impl PowerAssertion {
     pub fn prevent_display_sleep(name: &str) -> Option<Self> {
         let mut id: u32 = 0;
@@ -59,7 +65,7 @@ impl PowerAssertion {
     }
 }
 
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 impl Drop for PowerAssertion {
     fn drop(&mut self) {
         unsafe {
@@ -73,17 +79,33 @@ impl Drop for PowerAssertion {
     }
 }
 
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 pub static mut GLOBAL_ASSERTION: Option<PowerAssertion> = None;
 
-#[cfg(all(target_os = "macos", feature = "macos_service"))]
+#[cfg(target_os = "macos")]
 pub fn init_power_management() {
     unsafe {
         if GLOBAL_ASSERTION.is_none() {
             GLOBAL_ASSERTION = PowerAssertion::prevent_display_sleep("SelfControl Agent - Remote Access Active");
+            spawn_periodic_wake();
         }
     }
 }
 
-#[cfg(not(all(target_os = "macos", feature = "macos_service")))]
+#[cfg(target_os = "macos")]
+fn spawn_periodic_wake() {
+    std::thread::spawn(|| {
+        let name = CFString::from_static_string("SelfControl Agent Wake Activity");
+        loop {
+            let mut id: u32 = 0;
+            unsafe {
+                // kIOPMUserActivityTypeLive (0) is generally sufficient to wake/keep display on
+                IOPMAssertionDeclareUserActivity(name.as_concrete_TypeRef() as *const _, 0, &mut id);
+            }
+            std::thread::sleep(std::time::Duration::from_secs(30));
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
 pub fn init_power_management() {}
