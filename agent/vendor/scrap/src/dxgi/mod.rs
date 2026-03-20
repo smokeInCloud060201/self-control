@@ -52,6 +52,7 @@ impl Capturer {
         let mut duplication = ptr::null_mut();
         let mut desc = unsafe { mem::uninitialized() };
 
+        let mut feature_level = D3D_FEATURE_LEVEL_9_1;
         if unsafe {
             D3D11CreateDevice(
                 &mut **display.adapter,
@@ -62,7 +63,7 @@ impl Capturer {
                 0, // Feature levels' length.
                 D3D11_SDK_VERSION,
                 &mut device,
-                &mut D3D_FEATURE_LEVEL_9_1,
+                &mut feature_level,
                 &mut context
             )
         } != S_OK {

@@ -333,10 +333,10 @@ fn parse_key(key: &str) -> Option<enigo::Key> {
     }
 }
 
-fn set_resolution(display_index: usize, width: usize, height: usize) -> Result<()> {
+fn set_resolution(_display_index: usize, width: usize, height: usize) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        tracing::info!("Resolution switch requested for macOS display {} to {}x{} (Implementation pending)", display_index, width, height);
+        tracing::info!("Resolution switch requested for macOS display {} to {}x{} (Implementation pending)", _display_index, width, height);
         Ok(())
     }
 

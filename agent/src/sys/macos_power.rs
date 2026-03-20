@@ -80,13 +80,13 @@ impl Drop for PowerAssertion {
 }
 
 #[cfg(target_os = "macos")]
-pub static mut GLOBAL_ASSERTION: Option<PowerAssertion> = None;
+pub static GLOBAL_ASSERTION: std::sync::Mutex<Option<PowerAssertion>> = std::sync::Mutex::new(None);
 
 #[cfg(target_os = "macos")]
 pub fn init_power_management() {
-    unsafe {
-        if GLOBAL_ASSERTION.is_none() {
-            GLOBAL_ASSERTION = PowerAssertion::prevent_display_sleep("SelfControl Agent - Remote Access Active");
+    if let Ok(mut assertion) = GLOBAL_ASSERTION.lock() {
+        if assertion.is_none() {
+            *assertion = PowerAssertion::prevent_display_sleep("SelfControl Agent - Remote Access Active");
             spawn_periodic_wake();
         }
     }
