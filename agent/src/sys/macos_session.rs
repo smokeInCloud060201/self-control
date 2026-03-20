@@ -27,11 +27,16 @@ pub fn is_login_window() -> bool {
         
         match dict.find(&key) {
             Some(name_ptr) => {
-                // name_ptr is an ItemRef<'_, CFTypeRef>
-                // We wrap it as a CFString
-                let name = CFString::wrap_under_get_rule(*name_ptr as *const _);
-                let name_str = name.to_string();
-                name_str == "loginwindow"
+                use core_foundation::base::CFGetTypeID;
+                use core_foundation::string::CFStringGetTypeID;
+                
+                if CFGetTypeID(*name_ptr as *const _) == CFStringGetTypeID() {
+                    let name = CFString::wrap_under_get_rule(*name_ptr as *const _);
+                    let name_str = name.to_string();
+                    name_str == "loginwindow"
+                } else {
+                    false
+                }
             }
             None => false,
         }

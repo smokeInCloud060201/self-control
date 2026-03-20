@@ -13,7 +13,8 @@ pub struct Capturer {
     width: usize,
     height: usize,
     format: PixelFormat,
-    display: Display
+    display: Display,
+    _handler: FrameAvailableHandler
 }
 
 impl Capturer {
@@ -57,7 +58,7 @@ impl Capturer {
 
         match unsafe { CGDisplayStreamStart(stream) } {
             CGError::Success => Ok(Capturer {
-                stream, queue, width, height, format, display
+                stream, queue, width, height, format, display, _handler: handler
             }),
             x => Err(x)
         }
