@@ -8,6 +8,10 @@ use tokio_tungstenite::connect_async_with_config;
 use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
 use tracing::{debug, error, info, warn};
 use scrap::Display;
+use std::sync::Arc;
+
+use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use webrtc::ice_transport::ice_candidate::{RTCIceCandidateInit, RTCIceCandidate};
 
 use crate::app_state::AppState;
 
@@ -18,7 +22,6 @@ pub async fn start_connection_loop(
     event_tx: tokio::sync::mpsc::Sender<ControlEvent>,
     mut data_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
     mut response_rx: tokio::sync::mpsc::Receiver<serde_json::Value>,
-    channel_name: &str,
 ) -> Result<()> {
     let mut scheme = "ws";
     let mut server_clean = server.clone();
@@ -38,7 +41,7 @@ pub async fn start_connection_loop(
     
     loop {
         let current_pwd = { state.password_shared.lock().unwrap().clone() };
-        let proxy_url = format!("{}://{}:{}/agent/{}/{}/{}", scheme, server_clean, port, channel_name, state.machine_id, current_pwd);
+        let proxy_url = format!("{}://{}:{}/agent/{}/{}", scheme, server_clean, port, state.machine_id, current_pwd);
         
         debug!(url = %proxy_url, "Connecting to proxy");
         let ws_stream = match connect_async_with_config(&proxy_url, Some(config), true).await {
@@ -73,40 +76,88 @@ pub async fn start_connection_loop(
             }
         }
 
-        // Relay Control Events from Proxy
+        // WebRTC Initialization
+        let (signaling_tx, mut signaling_rx) = tokio::sync::mpsc::channel::<serde_json::Value>(50);
+        let signaling_tx_clone_for_ice = signaling_tx.clone();
+        
+        // This is safe to run since webrtc is memory safe
+        let (pc, mut video_dc_rx) = crate::network::webrtc::setup_webrtc(
+            event_tx.clone()
+        ).await?;
+
+        let pc_clone = pc.clone();
+        pc.on_ice_candidate(Box::new(move |c: Option<RTCIceCandidate>| {
+            let sig_tx = signaling_tx_clone_for_ice.clone();
+            Box::pin(async move {
+                if let Some(candidate) = c {
+                    if let Ok(json) = candidate.to_json() {
+                        let msg = serde_json::json!({
+                            "type": "ice_candidate",
+                            "candidate": json
+                        });
+                        let _ = sig_tx.send(msg).await;
+                    }
+                }
+            })
+        }));
+
+        // Relay Control Events from Proxy (SDP + ICE)
+        let signaling_tx_for_ws = signaling_tx.clone();
         let mut control_task = tokio::spawn(async move {
             while let Some(msg) = ws_receiver.next().await {
-                match msg {
-                    Ok(Message::Text(text)) => {
-                        if let Ok(event) = serde_json::from_str::<ControlEvent>(&text) {
-                            let _ = event_tx_clone.send(event).await;
+                if let Ok(Message::Text(text)) = msg {
+                    let json: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+                    let msg_type = json["type"].as_str().unwrap_or("");
+                    
+                    if msg_type == "offer" {
+                        if let Ok(sdp) = serde_json::from_value::<RTCSessionDescription>(json["sdp"].clone()) {
+                            if let Err(e) = pc_clone.set_remote_description(sdp).await {
+                                error!("Failed to set remote description: {}", e);
+                                continue;
+                            }
+                            if let Ok(answer) = pc_clone.create_answer(None).await {
+                                if let Ok(_) = pc_clone.set_local_description(answer.clone()).await {
+                                    let ans_msg = serde_json::json!({
+                                        "type": "answer",
+                                        "sdp": answer
+                                    });
+                                    let _ = signaling_tx_for_ws.send(ans_msg).await;
+                                }
+                            }
                         }
-                    }
-                    Ok(Message::Ping(_)) => {}
-                    Ok(_) => {},
-                    Err(e) => {
-                        debug!(error = %e, "Control stream error");
-                        break;
+                    } else if msg_type == "ice_candidate" {
+                        if let Ok(candidate) = serde_json::from_value::<RTCIceCandidateInit>(json["candidate"].clone()) {
+                            let _ = pc_clone.add_ice_candidate(candidate).await;
+                        }
+                    } else if let Ok(event) = serde_json::from_str::<ControlEvent>(&text) {
+                        let _ = event_tx_clone.send(event).await; // Legacy fallback
                     }
                 }
             }
         });
 
-        // Relay Data & Responses To Proxy
+        // Loop to forward JPEG Frames to DataChannel
+        let mut active_video_dc = None;
+
         loop {
             tokio::select! {
+                Some(dc) = video_dc_rx.recv() => {
+                    info!("Agent registered Video RTCDataChannel");
+                    active_video_dc = Some(dc);
+                }
                 Some(payload) = data_rx.recv() => {
-                    if let Err(e) = ws_sender.send(Message::Binary(payload)).await {
-                        debug!(error = %e, "Relay send failed");
-                        break;
+                    if let Some(dc) = &active_video_dc {
+                        let bytes = bytes::Bytes::from(payload);
+                        if let Err(e) = dc.send(&bytes).await {
+                            debug!(error = %e, "WebRTC DataChannel frame send dropped");
+                        }
                     }
                 }
-                Some(response) = response_rx.recv() => {
-                    if let Ok(text) = serde_json::to_string(&response) {
-                        if let Err(e) = ws_sender.send(Message::Text(text)).await {
-                            debug!(error = %e, "Response relay failed");
-                            break;
-                        }
+                Some(msg) = signaling_rx.recv() => {
+                    let text = msg.to_string();
+                    if let Err(e) = ws_sender.send(Message::Text(text)).await {
+                        debug!(error = %e, "Signaling TCP send failed");
+                        break;
                     }
                 }
                 _ = &mut control_task => {

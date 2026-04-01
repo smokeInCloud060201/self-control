@@ -10,7 +10,7 @@ use crate::models::session::{AppState, Session};
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
-    Path((channel, session_id, password)): Path<(String, String, String)>,
+    Path((session_id, password)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     req: axum::extract::Request,
 ) -> impl IntoResponse {
@@ -20,13 +20,12 @@ pub async fn ws_handler(
         "client"
     };
 
-    ws.on_upgrade(move |socket| handle_ws(socket, role.to_string(), channel, session_id, password, state))
+    ws.on_upgrade(move |socket| handle_ws(socket, role.to_string(), session_id, password, state))
 }
 
 async fn handle_ws(
     socket: WebSocket,
     role: String,
-    channel: String,
     session_id: String,
     password: String,
     state: Arc<AppState>,
@@ -38,10 +37,8 @@ async fn handle_ws(
     {
         let mut sessions = state.sessions.lock().unwrap();
         let session = sessions.entry(session_id.clone()).or_insert(Session {
-            agent_video: None,
-            agent_audio: None,
-            client_video: None,
-            client_audio: None,
+            agent: None,
+            client: None,
             password: None,
             last_activity: Instant::now(),
         });
@@ -49,29 +46,22 @@ async fn handle_ws(
         session.last_activity = Instant::now();
 
         if role == "agent" {
-            info!(session_id = %session_id, channel = %channel, "[AUTH] Agent linked");
+            info!(session_id = %session_id, "[AUTH] Agent linked");
             session.password = Some(password.clone());
-            if channel == "video" {
-                session.agent_video = Some(tx.clone());
-                if session.client_video.is_some() {
-                    debug!(session_id = %session_id, "Signaling agent to start: client video already present");
-                    let _ = session.agent_video.as_ref().unwrap().try_send(Message::Text("{\"type\": \"start_capture\"}".into()));
-                }
-            } else if channel == "audio" {
-                session.agent_audio = Some(tx.clone());
+            session.agent = Some(tx.clone());
+
+            if session.client.is_some() {
+                debug!(session_id = %session_id, "Signaling agent to start: client already present");
+                let _ = session.agent.as_ref().unwrap().try_send(Message::Text("{\"type\": \"start_capture\"}".into()));
             }
         } else if role == "client" {
             match &session.password {
                 Some(p) if p == &password => {
-                    info!(session_id = %session_id, channel = %channel, "[AUTH] Client linked");
-                    if channel == "video" {
-                        session.client_video = Some(tx.clone());
-                        if let Some(agent_tx) = &session.agent_video {
-                            debug!(session_id = %session_id, "Signaling agent to start: client video joined");
-                            let _ = agent_tx.try_send(Message::Text("{\"type\": \"start_capture\"}".into()));
-                        }
-                    } else if channel == "audio" {
-                        session.client_audio = Some(tx.clone());
+                    info!(session_id = %session_id, "[AUTH] Client linked");
+                    session.client = Some(tx.clone());
+                    if let Some(agent_tx) = &session.agent {
+                        debug!(session_id = %session_id, "Signaling agent to start: client joined");
+                        let _ = agent_tx.try_send(Message::Text("{\"type\": \"start_capture\"}".into()));
                     }
                 }
                 _ => {
@@ -99,9 +89,9 @@ async fn handle_ws(
             if let Some(session) = sessions.get_mut(&session_id) {
                 session.last_activity = Instant::now();
                 if role == "agent" {
-                    if channel == "video" { session.client_video.clone() } else { session.client_audio.clone() }
+                    session.client.clone()
                 } else {
-                    if channel == "video" { session.agent_video.clone() } else { session.agent_audio.clone() }
+                    session.agent.clone()
                 }
             } else {
                 None
@@ -125,18 +115,14 @@ async fn handle_ws(
         if let Some(session) = sessions.get_mut(&session_id) {
             session.last_activity = Instant::now();
             if role == "agent" {
-                info!(session_id = %session_id, channel = %channel, "[EXIT] Agent lost");
-                if channel == "video" { session.agent_video = None; } else { session.agent_audio = None; }
+                info!(session_id = %session_id, "[EXIT] Agent lost");
+                session.agent = None;
             } else {
-                info!(session_id = %session_id, channel = %channel, "[EXIT] Client lost");
-                if channel == "video" {
-                    session.client_video = None;
-                    if let Some(agent_tx) = &session.agent_video {
-                        debug!(session_id = %session_id, "Signaling agent to stop");
-                        let _ = agent_tx.try_send(Message::Text("{\"type\": \"stop_capture\"}".into()));
-                    }
-                } else {
-                    session.client_audio = None;
+                info!(session_id = %session_id, "[EXIT] Client lost");
+                session.client = None;
+                if let Some(agent_tx) = &session.agent {
+                    debug!(session_id = %session_id, "Signaling agent to stop");
+                    let _ = agent_tx.try_send(Message::Text("{\"type\": \"stop_capture\"}".into()));
                 }
             }
         }

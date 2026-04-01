@@ -17,7 +17,7 @@ services:
       - "8082:80"
     networks:
       - self-control
-    
+
 networks:
   self-control:
     driver: bridge

@@ -7,10 +7,8 @@ use tokio::sync::mpsc;
 pub type MsgSender = mpsc::Sender<Message>;
 
 pub struct Session {
-    pub agent_video: Option<MsgSender>,
-    pub agent_audio: Option<MsgSender>,
-    pub client_video: Option<MsgSender>,
-    pub client_audio: Option<MsgSender>,
+    pub agent: Option<mpsc::Sender<Message>>,
+    pub client: Option<mpsc::Sender<Message>>,
     pub password: Option<String>,
     pub last_activity: Instant,
 }

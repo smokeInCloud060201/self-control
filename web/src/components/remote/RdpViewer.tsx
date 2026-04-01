@@ -17,8 +17,9 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     const [showToolbar, setShowToolbar] = useState(false);
     const toolbarTimerRef = useRef<number | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const videoWsRef = useRef<WebSocket | null>(null);
-    const audioWsRef = useRef<WebSocket | null>(null);
+    const signalingWsRef = useRef<WebSocket | null>(null);
+    const rtcConnRef = useRef<RTCPeerConnection | null>(null);
+    const inputDcRef = useRef<RTCDataChannel | null>(null);
     const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
     const [displays, setDisplays] = useState<any[]>([]);
     const [currentDisplay, setCurrentDisplay] = useState(0);
@@ -68,169 +69,161 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
         }
 
         const startConnection = () => {
-            if (videoWsRef.current || audioWsRef.current) return;
+            if (signalingWsRef.current || rtcConnRef.current) return;
 
             setStatus('connecting');
             setError(null);
 
             const cleanProxyUrl = proxyUrl.endsWith('/') ? proxyUrl.slice(0, -1) : proxyUrl;
-            const videoWsUrl = `${cleanProxyUrl}/client/video/${sessionId}/${password || 'no-pass'}`;
-            const audioWsUrl = `${cleanProxyUrl}/client/audio/${sessionId}/${password || 'no-pass'}`;
+            const signalingWsUrl = `${cleanProxyUrl}/client/${sessionId}/${password || 'no-pass'}`;
+            const proxyHost = new URL(cleanProxyUrl).hostname || 'localhost';
 
-            console.log('[DEBUG] Connecting to Video & Audio WebSockets...');
+            console.log(`[DEBUG] Connecting to WebRTC Signaling Server at ${proxyHost}...`);
 
             try {
-                const videoWs = new WebSocket(videoWsUrl);
-                videoWs.binaryType = 'arraybuffer';
-                videoWsRef.current = videoWs;
+                const pc = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                    ]
+                });
 
-                const audioWs = new WebSocket(audioWsUrl);
-                audioWs.binaryType = 'arraybuffer';
-                audioWsRef.current = audioWs;
+                rtcConnRef.current = pc;
 
-                let connectedCount = 0;
-                const checkConnected = () => {
-                    connectedCount++;
-                    if (connectedCount === 2) {
-                        setStatus('connected');
-                    }
-                };
+                const signalingWs = new WebSocket(signalingWsUrl);
+                signalingWsRef.current = signalingWs;
 
-                videoWs.onopen = () => {
-                    if (isCleanup) { videoWs.close(); return; }
-                    checkConnected();
+                // 1. Create WebRTC DataChannels
+                const videoDc = pc.createDataChannel('video_stream', { ordered: false, maxRetransmits: 0 });
+                videoDc.binaryType = 'arraybuffer';
+                
+                const inputDc = pc.createDataChannel('input_stream', { ordered: true });
+                inputDcRef.current = inputDc;
 
-                    // Send client resolution to Agent for adaptive workspace
+                videoDc.onopen = () => console.log('[DEBUG] Video DataChannel Open');
+                inputDc.onopen = () => {
+                    console.log('[DEBUG] Input DataChannel Open');
+                    setStatus('connected');
+                    
+                    // Send resolution
                     const width = window.screen.width * window.devicePixelRatio;
                     const height = window.screen.height * window.devicePixelRatio;
-                    videoWs.send(JSON.stringify({
+                    inputDc.send(JSON.stringify({
                         type: 'resolution_update',
                         width: Math.round(width),
                         height: Math.round(height)
                     }));
                 };
 
-                audioWs.onopen = () => {
-                    if (isCleanup) { audioWs.close(); return; }
-                    checkConnected();
-                };
-
-                audioWs.onmessage = async (event) => {
+                videoDc.onmessage = async (event) => {
                     if (isCleanup) return;
                     if (event.data instanceof ArrayBuffer) {
-                        const view = new DataView(event.data);
-                        const type = view.getUint8(0);
-                        const payload = event.data.slice(1);
-
-                        if (type === 0x02) { // Audio
-                            if (audioContextRef.current && audioContextRef.current.state === 'running') {
-                                const ctx = audioContextRef.current;
-                                const pcm16 = new Int16Array(payload);
-                                const buffer = ctx.createBuffer(1, pcm16.length, 44100);
-                                const data = buffer.getChannelData(0);
-                                for (let i = 0; i < pcm16.length; i++) {
-                                    data[i] = pcm16[i] / 32768.0;
-                                }
-
-                                const source = ctx.createBufferSource();
-                                source.buffer = buffer;
-                                source.connect(ctx.destination);
-
-                                const startTime = Math.max(ctx.currentTime, nextAudioTimeRef.current);
-                                source.start(startTime);
-                                nextAudioTimeRef.current = startTime + buffer.duration;
-                            }
-                        }
-                    }
-                };
-
-                videoWs.onmessage = async (event) => {
-                    if (isCleanup) return;
-                    if (event.data instanceof ArrayBuffer) {
-                        const view = new DataView(event.data);
-                        const type = view.getUint8(0);
-                        const payload = event.data.slice(1);
-
-                        if (type === 0x01) { // Video
-                            try {
-                                const blob = new Blob([payload], { type: 'image/jpeg' });
-                                const bitmap = await createImageBitmap(blob);
-
-                                const canvas = canvasRef.current;
-                                if (canvas) {
-                                    const ctx = canvas.getContext('2d');
-                                    if (ctx) {
-                                        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-                                            canvas.width = bitmap.width;
-                                            canvas.height = bitmap.height;
-                                            setAspectRatio(bitmap.width / bitmap.height);
-                                        }
-                                        ctx.drawImage(bitmap, 0, 0);
-                                    }
-                                }
-                            } catch (e) {
-                                console.error('[DEBUG] Frame decode error:', e);
-                            }
-                        }
-                    } else if (typeof event.data === 'string') {
                         try {
-                            const json = JSON.parse(event.data);
-                            if (json.type === 'metadata' && json.displays) {
-                                console.log('[DEBUG] Displays found:', json.displays);
-                                setDisplays(json.displays);
-                            } else if (json.type === 'clipboard_sync') {
-                                console.log('[DEBUG] Clipboard sync received');
-                                if (json.text) {
-                                    navigator.clipboard.writeText(json.text).catch(err => {
-                                        console.error('Failed to write to local clipboard:', err);
-                                    });
+                            const blob = new Blob([event.data], { type: 'image/jpeg' });
+                            const bitmap = await createImageBitmap(blob);
+
+                            const canvas = canvasRef.current;
+                            if (canvas) {
+                                const ctx = canvas.getContext('2d');
+                                if (ctx) {
+                                    if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+                                        canvas.width = bitmap.width;
+                                        canvas.height = bitmap.height;
+                                        setAspectRatio(bitmap.width / bitmap.height);
+                                    }
+                                    ctx.drawImage(bitmap, 0, 0);
                                 }
                             }
-                        } catch (e) { }
+                        } catch (e) {
+                            console.error('[DEBUG] Frame decode error:', e);
+                        }
                     }
                 };
 
-                const handleError = (e: any) => {
-                    if (isCleanup) return;
-                    console.error('[DEBUG] WebSocket Error:', e);
-                    setError('Connection failed. Please check credentials and proxy.');
-                    setStatus('error');
+                // 2. Setup ICE Candidate routing
+                pc.onicecandidate = (event) => {
+                    if (event.candidate && inputDcRef.current?.readyState === 'open') {
+                        signalingWs.send(JSON.stringify({
+                            type: 'ice_candidate',
+                            candidate: event.candidate
+                        }));
+                    }
                 };
 
-                videoWs.onerror = handleError;
-                audioWs.onerror = handleError;
+                // 3. Setup Signaling WS Routing
+                signalingWs.onopen = async () => {
+                    if (isCleanup) return;
+                    console.log('[DEBUG] Signaling connected, creating WebRTC Offer...');
+                    try {
+                        const offer = await pc.createOffer();
+                        await pc.setLocalDescription(offer);
+                        signalingWs.send(JSON.stringify({
+                            type: 'offer',
+                            sdp: offer
+                        }));
+                    } catch (e) {
+                        console.error('[DEBUG] Failed to create WebRTC offer', e);
+                    }
+                };
+
+                signalingWs.onmessage = async (event) => {
+                    if (isCleanup) return;
+                    try {
+                        const msg = JSON.parse(event.data);
+                        if (msg.type === 'answer') {
+                            await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                        } else if (msg.type === 'ice_candidate') {
+                            await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                        } else if (msg.type === 'metadata' && msg.displays) {
+                            setDisplays(msg.displays);
+                        } else if (msg.type === 'clipboard_sync' && msg.text) {
+                            navigator.clipboard.writeText(msg.text).catch(err => console.error(err));
+                        }
+                    } catch (e) {}
+                };
 
                 const handleClose = (event: any) => {
                     if (isCleanup) return;
-                    console.log('[DEBUG] WebSocket Closed:', event.code, event.reason);
+                    console.log('[DEBUG] Connection Closed');
                     setStatus('idle');
-                    if (event.code !== 1000 && event.code !== 1001) {
+                    if (event?.code && event.code !== 1000 && event.code !== 1001) {
                         setError(`Session ended: ${event.reason || 'Network error'} (${event.code})`);
                         setStatus('error');
                     }
                     onDisconnect?.();
                 };
 
-                videoWs.onclose = handleClose;
-                audioWs.onclose = handleClose;
+                signalingWs.onerror = () => handleError(new Error("Signaling WS Error"));
+                signalingWs.onclose = handleClose;
+                pc.onconnectionstatechange = () => {
+                    if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+                        handleClose({ code: 1006, reason: 'WebRTC Connection Failed' });
+                    }
+                };
+
             } catch (err) {
-                setError('Failed to initialize WebSockets.');
+                setError('Failed to initialize WebRTC.');
                 setStatus('error');
             }
+        };
+
+        const handleError = (e: any) => {
+            if (isCleanup) return;
+            console.error('[DEBUG] Connection Error:', e);
+            setError('Connection failed. Please check credentials and proxy.');
+            setStatus('error');
         };
 
         startConnection();
 
         return () => {
-            // console.log('[DEBUG] Cleaning up RdpViewer effect'); // Removed as per instructions
             isCleanup = true;
-            if (videoWsRef.current) {
-                videoWsRef.current.close(1000, 'Unmount');
-                videoWsRef.current = null;
+            if (signalingWsRef.current) {
+                signalingWsRef.current.close(1000, 'Unmount');
+                signalingWsRef.current = null;
             }
-            if (audioWsRef.current) {
-                audioWsRef.current.close(1000, 'Unmount');
-                audioWsRef.current = null;
+            if (rtcConnRef.current) {
+                rtcConnRef.current.close();
+                rtcConnRef.current = null;
             }
         };
     }, [proxyUrl, sessionId, password]);
@@ -277,17 +270,17 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
             }
         }
 
-        if (videoWsRef.current?.readyState === WebSocket.OPEN) {
+        if (inputDcRef.current?.readyState === 'open') {
             const coords = getScaledCoordinates(e.clientX, e.clientY);
             if (coords) {
-                videoWsRef.current.send(JSON.stringify({ type: 'MouseMove', ...coords }));
+                inputDcRef.current.send(JSON.stringify({ type: 'MouseMove', ...coords }));
             }
         }
     };
 
     const handleTouchStart = (e: React.TouchEvent) => {
         startInteracting();
-        if (videoWsRef.current?.readyState === WebSocket.OPEN && e.touches.length > 0) {
+        if (inputDcRef.current?.readyState === 'open' && e.touches.length > 0) {
             const touch = e.touches[0];
             const coords = getScaledCoordinates(touch.clientX, touch.clientY);
             
@@ -314,15 +307,15 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
 
             if (coords) {
                 // Always sync position first
-                videoWsRef.current.send(JSON.stringify({ type: 'MouseMove', ...coords }));
+                inputDcRef.current.send(JSON.stringify({ type: 'MouseMove', ...coords }));
                 lastTouchPosRef.current = { x: touch.clientX, y: touch.clientY };
 
                 if (e.touches.length === 1) {
                     isScrollingRef.current = false;
                     // Start long press timer for right click
                     longPressTimerRef.current = window.setTimeout(() => {
-                        if (videoWsRef.current?.readyState === WebSocket.OPEN) {
-                            videoWsRef.current.send(JSON.stringify({ type: 'MouseDown', button: 'right' }));
+                        if (inputDcRef.current?.readyState === 'open') {
+                            inputDcRef.current.send(JSON.stringify({ type: 'MouseDown', button: 'right' }));
                             // We don't send a matching MouseUp immediately to allow dragging if the agent supports it, 
                             // but usually context menu triggers on MouseDown or Click. 
                             // For simplicity, let's treat long press as a right-click "down".
@@ -330,7 +323,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                         longPressTimerRef.current = null;
                     }, 500);
 
-                    videoWsRef.current.send(JSON.stringify({ type: 'MouseDown', button: 'left' }));
+                    inputDcRef.current.send(JSON.stringify({ type: 'MouseDown', button: 'left' }));
                 } else if (e.touches.length === 2) {
                     isScrollingRef.current = true;
                     // Cancel left click if we transition to 2-finger scroll
@@ -338,14 +331,14 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                         clearTimeout(longPressTimerRef.current);
                         longPressTimerRef.current = null;
                     }
-                    videoWsRef.current.send(JSON.stringify({ type: 'MouseUp', button: 'left' }));
+                    inputDcRef.current.send(JSON.stringify({ type: 'MouseUp', button: 'left' }));
                 }
             }
         }
     };
 
     const handleTouchMove = (e: React.TouchEvent) => {
-        if (videoWsRef.current?.readyState === WebSocket.OPEN && e.touches.length > 0) {
+        if (inputDcRef.current?.readyState === 'open' && e.touches.length > 0) {
             const touch = e.touches[0];
             const coords = getScaledCoordinates(touch.clientX, touch.clientY);
             
@@ -359,13 +352,13 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                             longPressTimerRef.current = null;
                         }
                     }
-                    videoWsRef.current.send(JSON.stringify({ type: 'MouseMove', ...coords }));
+                    inputDcRef.current.send(JSON.stringify({ type: 'MouseMove', ...coords }));
                 } else if (e.touches.length === 2 && lastTouchPosRef.current) {
                     const deltaX = (touch.clientX - lastTouchPosRef.current.x);
                     const deltaY = (touch.clientY - lastTouchPosRef.current.y);
                     
                     // Send inverted scroll for more natural touch feel (swipe up to scroll down)
-                    videoWsRef.current.send(JSON.stringify({ 
+                    inputDcRef.current.send(JSON.stringify({ 
                         type: 'mouse_wheel', 
                         delta_x: Math.round(deltaX / 5), 
                         delta_y: Math.round(deltaY / 5) 
@@ -384,12 +377,12 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
             longPressTimerRef.current = null;
         }
 
-        if (videoWsRef.current?.readyState === WebSocket.OPEN) {
+        if (inputDcRef.current?.readyState === 'open') {
             if (!isScrollingRef.current) {
                 // If we were in a right-click state, we might need a mouse up for that, 
                 // but for now let's just ensure left-click is up.
-                videoWsRef.current.send(JSON.stringify({ type: 'MouseUp', button: 'left' }));
-                videoWsRef.current.send(JSON.stringify({ type: 'MouseUp', button: 'right' }));
+                inputDcRef.current.send(JSON.stringify({ type: 'MouseUp', button: 'left' }));
+                inputDcRef.current.send(JSON.stringify({ type: 'MouseUp', button: 'right' }));
             }
         }
         
@@ -400,8 +393,8 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     };
 
     const handleMouseDown = (button: 'left' | 'right') => {
-        if (videoWsRef.current?.readyState === WebSocket.OPEN) {
-            videoWsRef.current.send(JSON.stringify({
+        if (inputDcRef.current?.readyState === 'open') {
+            inputDcRef.current.send(JSON.stringify({
                 type: 'MouseDown',
                 button
             }));
@@ -409,8 +402,8 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     };
 
     const handleMouseUp = (button: 'left' | 'right') => {
-        if (videoWsRef.current?.readyState === WebSocket.OPEN) {
-            videoWsRef.current.send(JSON.stringify({
+        if (inputDcRef.current?.readyState === 'open') {
+            inputDcRef.current.send(JSON.stringify({
                 type: 'MouseUp',
                 button
             }));
@@ -418,7 +411,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (videoWsRef.current?.readyState === WebSocket.OPEN) {
+        if (inputDcRef.current?.readyState === 'open') {
             // Intercept Shortcuts (Cmd+V on Mac, Ctrl+V otherwise)
             const isMod = e.metaKey || e.ctrlKey;
             if (isMod && e.key.toLowerCase() === 'v') {
@@ -426,7 +419,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                 return; // Don't send the V to the remote as it's handled by PasteText
             }
 
-            videoWsRef.current.send(JSON.stringify({
+            inputDcRef.current.send(JSON.stringify({
                 type: 'KeyDown',
                 key: e.key
             }));
@@ -438,8 +431,8 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     };
 
     const handleKeyUp = (e: React.KeyboardEvent) => {
-        if (videoWsRef.current?.readyState === WebSocket.OPEN) {
-            videoWsRef.current.send(JSON.stringify({
+        if (inputDcRef.current?.readyState === 'open') {
+            inputDcRef.current.send(JSON.stringify({
                 type: 'KeyUp',
                 key: e.key
             }));
@@ -447,8 +440,8 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     };
 
     const switchDisplay = (index: number) => {
-        if (videoWsRef.current?.readyState === WebSocket.OPEN) {
-            videoWsRef.current.send(JSON.stringify({ type: 'switch_display', index }));
+        if (inputDcRef.current?.readyState === 'open') {
+            inputDcRef.current.send(JSON.stringify({ type: 'switch_display', index }));
             setCurrentDisplay(index);
         }
     };
@@ -456,8 +449,8 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
     const syncClipboard = async () => {
         try {
             const text = await navigator.clipboard.readText();
-            if (text && videoWsRef.current?.readyState === WebSocket.OPEN) {
-                videoWsRef.current.send(JSON.stringify({ type: 'paste_text', text }));
+            if (text && inputDcRef.current?.readyState === 'open') {
+                inputDcRef.current.send(JSON.stringify({ type: 'paste_text', text }));
             }
         } catch (err) {
             console.error('Failed to read clipboard:', err);
@@ -631,8 +624,8 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                 {showVirtualKeyboard && isMobile && (
                     <VirtualKeyboard 
                         onKeyPress={(key, isDown) => {
-                            if (videoWsRef.current?.readyState === WebSocket.OPEN) {
-                                videoWsRef.current.send(JSON.stringify({ 
+                            if (inputDcRef.current?.readyState === 'open') {
+                                inputDcRef.current.send(JSON.stringify({ 
                                     type: isDown ? 'key_down' : 'key_up', 
                                     key 
                                 }));
