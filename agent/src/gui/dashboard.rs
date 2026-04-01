@@ -1,6 +1,6 @@
 use eframe::egui;
-use std::sync::{Arc, Mutex};
 use crate::config::{AppConfig, save_config};
+use crate::app_state::AppState;
 
 #[derive(PartialEq)]
 enum View {
@@ -9,10 +9,7 @@ enum View {
 }
 
 pub struct DashboardApp {
-    pub machine_id: String,
-    pub password: Arc<Mutex<String>>,
-    pub is_streaming: Arc<Mutex<bool>>,
-    pub status: Arc<Mutex<String>>,
+    pub state: AppState,
     current_view: View,
     settings_passkey: String,
     
@@ -23,18 +20,10 @@ pub struct DashboardApp {
 }
 
 impl DashboardApp {
-    pub fn new(
-        machine_id: String,
-        password: Arc<Mutex<String>>,
-        is_streaming: Arc<Mutex<bool>>,
-        status: Arc<Mutex<String>>,
-    ) -> Self {
-        let initial_pwd = { password.lock().unwrap().clone() };
+    pub fn new(state: AppState) -> Self {
+        let initial_pwd = { state.password_shared.lock().unwrap().clone() };
         Self {
-            machine_id,
-            password,
-            is_streaming,
-            status,
+            state,
             current_view: View::Dashboard,
             settings_passkey: initial_pwd,
             last_copy_id: None,
@@ -47,8 +36,8 @@ impl DashboardApp {
 
 impl eframe::App for DashboardApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let status = { self.status.lock().unwrap().clone() };
-        let is_streaming = { *self.is_streaming.lock().unwrap() };
+        let status = { self.state.status.lock().unwrap().clone() };
+        let is_streaming = { *self.state.is_streaming.lock().unwrap() };
         let current_time = ctx.input(|i| i.time);
 
         // Update streaming timer
@@ -130,11 +119,11 @@ impl eframe::App for DashboardApp {
                                     ui.label("Machine ID");
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                         if ui.button("📋").on_hover_text("Copy Machine ID").clicked() {
-                                            ui.output_mut(|o| o.copied_text = self.machine_id.clone());
+                                            ui.output_mut(|o| o.copied_text = self.state.machine_id.clone());
                                             self.last_copy_id = Some("machine_id".to_string());
                                             self.copy_feedback_time = current_time;
                                         }
-                                        ui.label(egui::RichText::new(&self.machine_id).monospace().strong().color(egui::Color32::LIGHT_GRAY));
+                                        ui.label(egui::RichText::new(&self.state.machine_id).monospace().strong().color(egui::Color32::LIGHT_GRAY));
                                     });
                                 });
 
@@ -150,7 +139,7 @@ impl eframe::App for DashboardApp {
 
                                 // Passkey Row
                                 ui.horizontal(|ui| {
-                                    let current_pwd = { self.password.lock().unwrap().clone() };
+                                    let current_pwd = { self.state.password_shared.lock().unwrap().clone() };
                                     ui.label("Passkey");
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                         if ui.button("📋").on_hover_text("Copy Passkey").clicked() {
@@ -209,14 +198,14 @@ impl eframe::App for DashboardApp {
                                 }
                                 save_config(&config);
                                 
-                                let mut pwd = self.password.lock().unwrap();
+                                let mut pwd = self.state.password_shared.lock().unwrap();
                                 *pwd = self.settings_passkey.clone();
                                 
                                 self.current_view = View::Dashboard;
                             }
                             
                             if ui.button("Discard Changes").clicked() {
-                                let initial_pwd = { self.password.lock().unwrap().clone() };
+                                let initial_pwd = { self.state.password_shared.lock().unwrap().clone() };
                                 self.settings_passkey = initial_pwd;
                                 self.current_view = View::Dashboard;
                             }

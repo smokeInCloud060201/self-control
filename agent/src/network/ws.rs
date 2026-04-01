@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::models::ControlEvent;
 use futures_util::{SinkExt, StreamExt};
-use std::sync::{Arc, Mutex};
+
 use std::time::Duration;
 use tokio::time::sleep;
 use tokio_tungstenite::connect_async_with_config;
@@ -9,17 +9,15 @@ use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
 use tracing::{debug, error, info, warn};
 use scrap::Display;
 
+use crate::app_state::AppState;
+
 pub async fn start_connection_loop(
     server: String,
     port: u16,
-    machine_id: String,
-    password: Arc<Mutex<String>>,
-    is_streaming: Arc<Mutex<bool>>,
-    _display_index: Arc<Mutex<usize>>,
+    state: AppState,
     event_tx: tokio::sync::mpsc::Sender<ControlEvent>,
     mut data_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
     mut response_rx: tokio::sync::mpsc::Receiver<serde_json::Value>,
-    status: Arc<Mutex<String>>,
 ) -> Result<()> {
     let mut scheme = "ws";
     let mut server_clean = server.clone();
@@ -38,8 +36,8 @@ pub async fn start_connection_loop(
     };
     
     loop {
-        let current_pwd = { password.lock().unwrap().clone() };
-        let proxy_url = format!("{}://{}:{}/agent/{}/{}", scheme, server_clean, port, machine_id, current_pwd);
+        let current_pwd = { state.password_shared.lock().unwrap().clone() };
+        let proxy_url = format!("{}://{}:{}/agent/{}/{}", scheme, server_clean, port, state.machine_id, current_pwd);
         
         debug!(url = %proxy_url, "Connecting to proxy");
         let ws_stream = match connect_async_with_config(&proxy_url, Some(config), true).await {
@@ -50,7 +48,7 @@ pub async fn start_connection_loop(
                 continue;
             }
         };
-        { *status.lock().unwrap() = "Connected".to_string(); }
+        { *state.status.lock().unwrap() = "Connected".to_string(); }
         info!("Connected to proxy {}:{}", server_clean, port);
 
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
@@ -117,8 +115,8 @@ pub async fn start_connection_loop(
         }
         
         control_task.abort();
-        { *is_streaming.lock().unwrap() = false; }
-        { *status.lock().unwrap() = "Disconnected".to_string(); }
+        { *state.is_streaming.lock().unwrap() = false; }
+        { *state.status.lock().unwrap() = "Disconnected".to_string(); }
         warn!("Connection lost, re-establishing in 2s...");
         sleep(Duration::from_secs(2)).await;
     }
