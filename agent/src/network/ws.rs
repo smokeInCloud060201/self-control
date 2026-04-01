@@ -149,7 +149,7 @@ pub async fn start_connection_loop(
                     if let Some(dc) = &active_video_dc {
                         let bytes = bytes::Bytes::from(payload);
                         if let Err(e) = dc.send(&bytes).await {
-                            debug!(error = %e, "WebRTC DataChannel frame send dropped");
+                            tracing::error!(error = %e, "WebRTC DataChannel frame send dropped");
                         }
                     }
                 }

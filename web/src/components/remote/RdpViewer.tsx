@@ -93,7 +93,7 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                 signalingWsRef.current = signalingWs;
 
                 // 1. Create WebRTC DataChannels
-                const videoDc = pc.createDataChannel('video_stream', { ordered: false, maxRetransmits: 0 });
+                const videoDc = pc.createDataChannel('video_stream', { ordered: false, maxPacketLifeTime: 500 });
                 videoDc.binaryType = 'arraybuffer';
                 
                 const inputDc = pc.createDataChannel('input_stream', { ordered: true });

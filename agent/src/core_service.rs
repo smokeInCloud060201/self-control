@@ -18,13 +18,14 @@ pub fn start_background_services(
 
             // Audio Capture Task
             // FIXME: Need to route audio over WebRTC later or drop for now
-            // We disable audio transmission entirely in V1 UDP MJPEG implementation.
+            /* Wait for WebRTC Audio DataChannel implementation
             std::thread::spawn(move || {
                 let (dummy_tx, _) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
                 if let Err(e) = capture::audio::start_audio_capture(dummy_tx) {
                     tracing::warn!(error = %e, "Audio capture failed to start");
                 }
             });
+            */
 
             // Video Capture Task
             let is_streaming_cap = state.is_streaming.clone();

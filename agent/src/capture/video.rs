@@ -118,7 +118,7 @@ pub fn start_video_capture(
                 last_frame_hash = current_hash;
 
                 let mut buffer = Vec::new();
-                let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 40);
+                let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 25);
                 
                 let mut rgb_data = vec![0u8; real_width * real_height * 3];
                 for row in 0..real_height {
@@ -140,9 +140,7 @@ pub fn start_video_capture(
                             tracing::info!("Encoded JPEG! Buffer len: {}, width: {}, height: {}", buffer.len(), width, height);
                         }
 
-                        let mut payload = vec![0x01]; // Video Type
-                        payload.extend_from_slice(&buffer);
-                        if let Err(_) = frame_tx.try_send(payload) {
+                        if let Err(_) = frame_tx.try_send(buffer.clone()) {
                             frames_dropped += 1;
                         } else {
                             frame_sent += 1;
