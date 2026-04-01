@@ -6,7 +6,7 @@
     <string>com.selfcontrol.agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/self-control-agent</string>
+        <string>/Applications/SelfControlAgent.app/Contents/MacOS/self-control-agent</string>
         <string>--service</string>
     </array>
     
@@ -16,15 +16,23 @@
         <string>https://selfcontrol-api.sonbn.xyz</string>
         <key>PROXY_PORT</key>
         <string>443</string>
+        <key>PASSWORD</key>
+        <string>123456</string>
         <!-- The machine ID and password can be explicitly stated here or pulled from the config.json file auto-created by the app -->
     </dict>
+
+    <key>LimitLoadToSessionType</key>
+    <array>
+        <string>LoginWindow</string>
+        <string>Aqua</string>
+    </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/var/log/self-control-agent.log</string>
+    <string>/tmp/self-control-agent.log</string>
     <key>StandardErrorPath</key>
-    <string>/var/log/self-control-agent.err</string>
+    <string>/tmp/self-control-agent.err</string>
 </dict>
 </plist>
