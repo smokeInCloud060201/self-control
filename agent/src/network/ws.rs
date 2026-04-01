@@ -147,9 +147,16 @@ pub async fn start_connection_loop(
                 }
                 Some(payload) = data_rx.recv() => {
                     if let Some(dc) = &active_video_dc {
-                        let bytes = bytes::Bytes::from(payload);
-                        if let Err(e) = dc.send(&bytes).await {
-                            tracing::error!(error = %e, "WebRTC DataChannel frame send dropped");
+                        let bytes = payload; // Vec<u8>
+                        let chunk_size = 60000;
+                        for chunk in bytes.chunks(chunk_size) {
+                            if let Err(e) = dc.send(&bytes::Bytes::copy_from_slice(chunk)).await {
+                                tracing::error!(error = %e, "WebRTC DataChannel frame send dropped");
+                            }
+                        }
+                        // Send empty buffer to signal end of frame
+                        if let Err(e) = dc.send(&bytes::Bytes::new()).await {
+                            tracing::error!(error = %e, "WebRTC EOF send dropped");
                         }
                     }
                 }

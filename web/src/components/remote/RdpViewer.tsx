@@ -92,8 +92,8 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                 const signalingWs = new WebSocket(signalingWsUrl);
                 signalingWsRef.current = signalingWs;
 
-                // 1. Create WebRTC DataChannels
-                const videoDc = pc.createDataChannel('video_stream', { ordered: false, maxPacketLifeTime: 500 });
+                // 1. Create WebRTC DataChannels (Fully Reliable to allow seamless 256KB SCTP fragmentation)
+                const videoDc = pc.createDataChannel('video_stream');
                 videoDc.binaryType = 'arraybuffer';
                 
                 const inputDc = pc.createDataChannel('input_stream', { ordered: true });
@@ -114,27 +114,35 @@ const RdpViewer: React.FC<RdpViewerProps> = ({ sessionId, password, proxyUrl, on
                     }));
                 };
 
+                let frameChunks: ArrayBuffer[] = [];
                 videoDc.onmessage = async (event) => {
                     if (isCleanup) return;
                     if (event.data instanceof ArrayBuffer) {
-                        try {
-                            const blob = new Blob([event.data], { type: 'image/jpeg' });
-                            const bitmap = await createImageBitmap(blob);
+                        if (event.data.byteLength === 0) {
+                            if (frameChunks.length === 0) return;
+                            try {
+                                const blob = new Blob(frameChunks, { type: 'image/jpeg' });
+                                frameChunks = []; // reset for next frame
+                                const bitmap = await createImageBitmap(blob);
 
-                            const canvas = canvasRef.current;
-                            if (canvas) {
-                                const ctx = canvas.getContext('2d');
-                                if (ctx) {
-                                    if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-                                        canvas.width = bitmap.width;
-                                        canvas.height = bitmap.height;
-                                        setAspectRatio(bitmap.width / bitmap.height);
+                                const canvas = canvasRef.current;
+                                if (canvas) {
+                                    const ctx = canvas.getContext('2d');
+                                    if (ctx) {
+                                        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+                                            canvas.width = bitmap.width;
+                                            canvas.height = bitmap.height;
+                                            setAspectRatio(bitmap.width / bitmap.height);
+                                        }
+                                        ctx.drawImage(bitmap, 0, 0);
                                     }
-                                    ctx.drawImage(bitmap, 0, 0);
                                 }
+                            } catch (e) {
+                                console.error('[DEBUG] Frame decode error:', e);
+                                frameChunks = []; // Drop corrupted frame
                             }
-                        } catch (e) {
-                            console.error('[DEBUG] Frame decode error:', e);
+                        } else {
+                            frameChunks.push(event.data);
                         }
                     }
                 };
