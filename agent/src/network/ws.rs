@@ -18,6 +18,7 @@ pub async fn start_connection_loop(
     event_tx: tokio::sync::mpsc::Sender<ControlEvent>,
     mut data_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
     mut response_rx: tokio::sync::mpsc::Receiver<serde_json::Value>,
+    channel_name: &str,
 ) -> Result<()> {
     let mut scheme = "ws";
     let mut server_clean = server.clone();
@@ -37,7 +38,7 @@ pub async fn start_connection_loop(
     
     loop {
         let current_pwd = { state.password_shared.lock().unwrap().clone() };
-        let proxy_url = format!("{}://{}:{}/agent/{}/{}", scheme, server_clean, port, state.machine_id, current_pwd);
+        let proxy_url = format!("{}://{}:{}/agent/{}/{}/{}", scheme, server_clean, port, channel_name, state.machine_id, current_pwd);
         
         debug!(url = %proxy_url, "Connecting to proxy");
         let ws_stream = match connect_async_with_config(&proxy_url, Some(config), true).await {

@@ -3,9 +3,11 @@ use std::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 use tracing::info;
 use lazy_static::lazy_static;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 lazy_static! {
     static ref AUDIO_TX: Mutex<Option<Sender<Vec<u8>>>> = Mutex::new(None);
+    static ref DROPPED_AUDIO_FRAMES: AtomicUsize = AtomicUsize::new(0);
 }
 
 // C-Callback invoked by our Objective-C ScreenCaptureKit helper.
@@ -33,8 +35,13 @@ extern "C" fn audio_callback(data: *const u8, length: usize) {
             
             // Send the async message using try_send to avoid deadlocking or blocking 
             // the core_audio loop if the network is disconnected or lagging.
-            if let Err(e) = tx.try_send(pcm) {
+            if let Err(_) = tx.try_send(pcm) {
                 // Channel full or disconnected, drop the audio frame
+                let dropped = DROPPED_AUDIO_FRAMES.fetch_add(1, Ordering::Relaxed);
+                if dropped == 50 {
+                    tracing::warn!("Audio channel full! Over 50 audio packets dropped recently due to backpressure/network lag.");
+                    DROPPED_AUDIO_FRAMES.store(0, Ordering::Relaxed);
+                }
             }
         }
     }

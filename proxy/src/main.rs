@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
             tokio::time::sleep(Duration::from_secs(60)).await;
             let mut sessions = gc_state.sessions.lock().unwrap();
             sessions.retain(|id, s| {
-                if s.agent.is_none() && s.client.is_none() && s.last_activity.elapsed().as_secs() > 300 {
+                if s.agent_video.is_none() && s.agent_audio.is_none() && s.client_video.is_none() && s.client_audio.is_none() && s.last_activity.elapsed().as_secs() > 300 {
                     info!(session_id = %id, "[GC] Purging stale session");
                     false
                 } else {
@@ -47,8 +47,8 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/health", get(health_check))
-        .route("/agent/:session_id/:password", get(ws_handler))
-        .route("/client/:session_id/:password", get(ws_handler))
+        .route("/agent/:channel/:session_id/:password", get(ws_handler))
+        .route("/client/:channel/:session_id/:password", get(ws_handler))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;
