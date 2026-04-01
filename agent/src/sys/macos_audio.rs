@@ -31,8 +31,11 @@ extern "C" fn audio_callback(data: *const u8, length: usize) {
                 pcm.extend_from_slice(&s.to_le_bytes());
             }
             
-            // Send the async message
-            let _ = tx.blocking_send(pcm);
+            // Send the async message using try_send to avoid deadlocking or blocking 
+            // the core_audio loop if the network is disconnected or lagging.
+            if let Err(e) = tx.try_send(pcm) {
+                // Channel full or disconnected, drop the audio frame
+            }
         }
     }
 }

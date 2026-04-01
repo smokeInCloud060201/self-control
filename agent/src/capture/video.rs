@@ -72,12 +72,41 @@ pub fn start_video_capture(
 
         match capturer.frame() {
             Ok(frame) => {
+                let mut real_width = width;
+                let mut real_height = height;
+
                 let expected = width * height * 4;
                 if frame.len() < expected { continue; }
 
+                // Retina and display scaling check
+                if frame.len() > expected {
+                    // We assume it's scaled. Common scales are 2x (retina) 
+                    let scale_squared = frame.len() / expected;
+                    if scale_squared == 4 {
+                        real_width = width * 2;
+                        real_height = height * 2;
+                    } else if scale_squared == 1 {
+                        // Just padding?
+                        // If it's padding, stride is frame.len() / height
+                    } else {
+                        // Best guess: square root of scale
+                        let scale = (scale_squared as f64).sqrt() as usize;
+                        if scale * scale == scale_squared {
+                            real_width = width * scale;
+                            real_height = height * scale;
+                        } else {
+                            // Can't guess, maybe irregular padding
+                            tracing::warn!("Unpredictable frame scale. Length: {}, expected: {}", frame.len(), expected);
+                        }
+                    }
+                }
+                
+                let real_expected = real_width * real_height * 4;
+                if frame.len() < real_expected { continue; }
+
                 // 1. Calculate Hash to detect changes
                 let mut hasher = Hasher::new();
-                hasher.update(&frame[..expected]);
+                hasher.update(&frame[..real_expected]);
                 let current_hash = hasher.finalize();
 
                 if current_hash == last_frame_hash {
@@ -87,25 +116,35 @@ pub fn start_video_capture(
                 last_frame_hash = current_hash;
 
                 let mut buffer = Vec::new();
-                // 2. Use JPEG with tuned quality
                 let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 40);
                 
-                let mut rgb_data = vec![0u8; width * height * 3];
-                for (i, chunk) in frame[..expected].chunks_exact(4).enumerate() {
-                    rgb_data[i * 3] = chunk[2];
+                let mut rgb_data = vec![0u8; real_width * real_height * 3];
+                for (i, chunk) in frame[..real_expected].chunks_exact(4).enumerate() {
+                    rgb_data[i * 3]     = chunk[2];
                     rgb_data[i * 3 + 1] = chunk[1];
                     rgb_data[i * 3 + 2] = chunk[0];
                 }
 
-                if let Some(img) = RgbImage::from_raw(width as u32, height as u32, rgb_data) {
+                if let Some(img) = RgbImage::from_raw(real_width as u32, real_height as u32, rgb_data) {
                     if let Ok(_) = encoder.encode_image(&img) {
+                        if frame_sent % 30 == 0 {
+                            tracing::info!("Encoded JPEG! Buffer len: {}, width: {}, height: {}", buffer.len(), width, height);
+                        }
                         let mut payload = vec![0x01]; // Video Type
                         payload.extend_from_slice(&buffer);
-                        if let Err(_) = frame_tx.blocking_send(payload) {
-                            break; // Receiver dropped
+                        // Using try_send means we don't block the video thread 
+                        // if the network loop is lagging behind. Piling up frames 
+                        // creates latency anyway. Dropping a frame is better.
+                        if let Err(_) = frame_tx.try_send(payload) {
+                            // Channel is full or disconnected, drop frame
+                        } else {
+                            frame_sent += 1;
                         }
-                        frame_sent += 1;
+                    } else {
+                        tracing::warn!("Failed to encode image!");
                     }
+                } else {
+                    tracing::warn!("Failed to create RgbImage from raw! expected raw len: {}, got: {}", width * height * 3, width * height * 3);
                 }
                 
                 if last_status.elapsed().as_secs() >= 5 {
