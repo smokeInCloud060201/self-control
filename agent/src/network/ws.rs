@@ -138,9 +138,16 @@ pub async fn start_connection_loop(
 
         // Loop to forward JPEG Frames to DataChannel
         let mut active_video_dc = None;
+        let mut ping_interval = tokio::time::interval(Duration::from_secs(30));
 
         loop {
             tokio::select! {
+                _ = ping_interval.tick() => {
+                    if let Err(e) = ws_sender.send(Message::Ping(vec![])).await {
+                        debug!(error = %e, "Failed to send Ping heartbeat to proxy");
+                        break;
+                    }
+                }
                 Some(dc) = video_dc_rx.recv() => {
                     info!("Agent registered Video RTCDataChannel");
                     active_video_dc = Some(dc);

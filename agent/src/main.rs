@@ -67,21 +67,28 @@ fn main() -> Result<()> {
         args.port,
     );
 
-    // Start GUI Dashboard on Main Thread
-    let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 350.0])
-            .with_resizable(false),
-        ..Default::default()
-    };
+    if args.service {
+        info!("Running as background service... GUI disabled.");
+        loop {
+            std::thread::park();
+        }
+    } else {
+        // Start GUI Dashboard on Main Thread
+        let options = eframe::NativeOptions {
+            viewport: eframe::egui::ViewportBuilder::default()
+                .with_inner_size([400.0, 350.0])
+                .with_resizable(false),
+            ..Default::default()
+        };
 
-    eframe::run_native(
-        "SelfControl Agent",
-        options,
-        Box::new(|_cc| {
-            Box::new(gui::dashboard::DashboardApp::new(state))
-        }),
-    ).map_err(|e| anyhow::anyhow!("Eframe error: {}", e))?;
+        eframe::run_native(
+            "SelfControl Agent",
+            options,
+            Box::new(|_cc| {
+                Box::new(gui::dashboard::DashboardApp::new(state))
+            }),
+        ).map_err(|e| anyhow::anyhow!("Eframe error: {}", e))?;
+    }
 
     Ok(())
 }

@@ -9,6 +9,15 @@
         <string>/usr/local/bin/self-control-agent</string>
         <string>--service</string>
     </array>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PROXY_SERVER</key>
+        <string>https://selfcontrol-api.sonbn.xyz</string>
+        <key>PROXY_PORT</key>
+        <string>443</string>
+        <!-- The machine ID and password can be explicitly stated here or pulled from the config.json file auto-created by the app -->
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
